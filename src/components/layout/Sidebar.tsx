@@ -8,6 +8,7 @@ import {
   XMarkIcon,
   ArrowUpTrayIcon,
   LinkIcon,
+  ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 import { cn } from '../../lib/utils';
 import { navigationItems } from '../../config/navigation';
@@ -26,6 +27,7 @@ const iconMap: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>
   'currency-dollar': CurrencyDollarIcon,
   'arrow-up-tray': ArrowUpTrayIcon,
   'link': LinkIcon,
+  'shield-check': ShieldCheckIcon,
 };
 
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile }: SidebarProps) {

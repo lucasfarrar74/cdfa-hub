@@ -8,6 +8,7 @@ import { MeetingScheduler } from './pages/MeetingScheduler';
 import { BudgetTracker } from './pages/BudgetTracker';
 import { DataImport } from './pages/DataImport';
 import { ActivityLinks } from './pages/ActivityLinks';
+import { Backup } from './pages/Backup';
 import './index.css';
 
 // Protected route wrapper
@@ -95,6 +96,7 @@ function AppRoutes() {
         <Route path="budget-tracker" element={<BudgetTracker />} />
         <Route path="data-import" element={<DataImport />} />
         <Route path="activity-links" element={<ActivityLinks />} />
+        <Route path="backup" element={<Backup />} />
       </Route>
 
       {/* Catch-all redirect */}

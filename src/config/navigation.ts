@@ -48,6 +48,13 @@ export const navigationItems: NavigationItem[] = [
     icon: 'link',
     section: 'tools',
   },
+  {
+    id: 'backup',
+    label: 'Backup & Restore',
+    path: '/backup',
+    icon: 'shield-check',
+    section: 'tools',
+  },
 ];
 
 export const quickActions: QuickAction[] = [
