@@ -84,7 +84,7 @@ export function detectHeaderRow(rows: (string | number | undefined)[][]): number
 /**
  * Check if a row is a data row (not empty, not a section header)
  */
-function isDataRow(row: (string | number | undefined)[], headerIndex: number): boolean {
+function isDataRow(row: (string | number | undefined)[], _headerIndex: number): boolean {
   if (!row) return false;
 
   // Count non-empty cells

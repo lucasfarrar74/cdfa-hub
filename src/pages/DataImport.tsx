@@ -39,7 +39,7 @@ export function DataImport() {
   const [iframeLoaded, setIframeLoaded] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const importTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const importTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meetingSchedulerTool = getToolById('meeting-scheduler');
 
   // Listen for import results from Meeting Scheduler

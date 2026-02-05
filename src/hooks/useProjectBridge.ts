@@ -19,7 +19,7 @@ export function useProjectBridge(): UseProjectBridgeResult {
   const [error, setError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const resolveRef = useRef<((result: { projectId: string; shareId?: string } | null) => void) | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Listen for project creation results
   useEffect(() => {
