@@ -8,18 +8,18 @@ import {
   XCircleIcon,
   ClockIcon,
 } from '@heroicons/react/24/outline';
-import {
-  collectHubData,
-  restoreHubData,
-  requestToolBackup,
-  sendRestoreToTool,
-  downloadBackup,
-  validateBackup,
-  getBackupStats,
-  type ComprehensiveBackup,
-} from '../services/backupService';
-import { tools } from '../config/tools';
 import { cn } from '../lib/utils';
+
+interface BackupData {
+  version: string;
+  createdAt: string;
+  hub: {
+    activityLinks: unknown[];
+    preferences: Record<string, unknown>;
+  };
+  projects: unknown;
+  scheduler: unknown;
+}
 
 interface BackupStatus {
   isCreating: boolean;
@@ -27,6 +27,109 @@ interface BackupStatus {
   lastBackup: string | null;
   error: string | null;
   success: string | null;
+}
+
+// Collect all data from localStorage
+function collectBackupData(): BackupData {
+  const data: BackupData = {
+    version: '2.0',
+    createdAt: new Date().toISOString(),
+    hub: {
+      activityLinks: [],
+      preferences: {},
+    },
+    projects: null,
+    scheduler: null,
+  };
+
+  // Collect activity links
+  try {
+    const activityLinks = localStorage.getItem('cdfa-activity-links');
+    if (activityLinks) {
+      data.hub.activityLinks = JSON.parse(activityLinks);
+    }
+  } catch (e) {
+    console.error('Failed to collect activity links:', e);
+  }
+
+  // Collect projects data
+  try {
+    const projects = localStorage.getItem('cdfa-hub-activities');
+    if (projects) {
+      data.projects = JSON.parse(projects);
+    }
+  } catch (e) {
+    console.error('Failed to collect projects data:', e);
+  }
+
+  // Collect scheduler data
+  try {
+    const scheduler = localStorage.getItem('cdfa-meeting-scheduler');
+    if (scheduler) {
+      data.scheduler = JSON.parse(scheduler);
+    }
+  } catch (e) {
+    console.error('Failed to collect scheduler data:', e);
+  }
+
+  // Collect preferences
+  try {
+    const theme = localStorage.getItem('theme');
+    if (theme) {
+      data.hub.preferences.theme = theme;
+    }
+  } catch (e) {
+    console.error('Failed to collect preferences:', e);
+  }
+
+  return data;
+}
+
+// Restore data to localStorage
+function restoreBackupData(data: BackupData): void {
+  // Restore activity links
+  if (data.hub?.activityLinks) {
+    localStorage.setItem('cdfa-activity-links', JSON.stringify(data.hub.activityLinks));
+  }
+
+  // Restore projects data
+  if (data.projects) {
+    localStorage.setItem('cdfa-hub-activities', JSON.stringify(data.projects));
+  }
+
+  // Restore scheduler data
+  if (data.scheduler) {
+    localStorage.setItem('cdfa-meeting-scheduler', JSON.stringify(data.scheduler));
+  }
+
+  // Restore preferences
+  if (data.hub?.preferences?.theme) {
+    localStorage.setItem('theme', String(data.hub.preferences.theme));
+  }
+}
+
+// Validate backup file
+function validateBackup(data: unknown): data is BackupData {
+  if (!data || typeof data !== 'object') return false;
+  const backup = data as Record<string, unknown>;
+  return (
+    typeof backup.version === 'string' &&
+    typeof backup.createdAt === 'string' &&
+    backup.hub !== undefined
+  );
+}
+
+// Download backup file
+function downloadBackup(data: BackupData): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cdfa-hub-backup-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 export function Backup() {
@@ -38,11 +141,9 @@ export function Backup() {
     success: null,
   });
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
-  const [pendingRestore, setPendingRestore] = useState<ComprehensiveBackup | null>(null);
-  const [toolStatuses, setToolStatuses] = useState<Map<string, 'pending' | 'success' | 'error'>>(new Map());
+  const [pendingRestore, setPendingRestore] = useState<BackupData | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -54,51 +155,14 @@ export function Backup() {
     }
   }, [status.error, status.success]);
 
-  // Register iframe refs
-  const registerIframe = useCallback((toolId: string, iframe: HTMLIFrameElement | null) => {
-    if (iframe) {
-      iframeRefs.current.set(toolId, iframe);
-    } else {
-      iframeRefs.current.delete(toolId);
-    }
-  }, []);
-
-  // Create comprehensive backup
-  const handleCreateBackup = useCallback(async () => {
+  // Create backup
+  const handleCreateBackup = useCallback(() => {
     setStatus(s => ({ ...s, isCreating: true, error: null, success: null }));
-    setToolStatuses(new Map(tools.map(t => [t.id, 'pending'])));
 
     try {
-      // Collect Hub data first
-      const backup: ComprehensiveBackup = {
-        version: '1.0',
-        createdAt: new Date().toISOString(),
-        hub: collectHubData(),
-        tools: [],
-      };
-
-      // Request data from each tool iframe
-      for (const tool of tools) {
-        const iframe = iframeRefs.current.get(tool.id);
-        if (iframe) {
-          try {
-            const toolData = await requestToolBackup(iframe, tool.id, 10000);
-            if (toolData) {
-              backup.tools.push(toolData);
-              setToolStatuses(s => new Map(s).set(tool.id, 'success'));
-            } else {
-              setToolStatuses(s => new Map(s).set(tool.id, 'error'));
-            }
-          } catch {
-            setToolStatuses(s => new Map(s).set(tool.id, 'error'));
-          }
-        }
-      }
-
-      // Download the backup
+      const backup = collectBackupData();
       downloadBackup(backup);
 
-      // Update last backup time
       const backupTime = new Date().toISOString();
       localStorage.setItem('cdfa-last-backup', backupTime);
 
@@ -106,7 +170,7 @@ export function Backup() {
         ...s,
         isCreating: false,
         lastBackup: backupTime,
-        success: `Backup created successfully! Includes ${backup.tools.length} tool(s).`,
+        success: 'Backup created successfully!',
       }));
     } catch (error) {
       setStatus(s => ({
@@ -148,40 +212,19 @@ export function Backup() {
   }, []);
 
   // Confirm and execute restore
-  const handleConfirmRestore = useCallback(async () => {
+  const handleConfirmRestore = useCallback(() => {
     if (!pendingRestore) return;
 
     setShowRestoreConfirm(false);
     setStatus(s => ({ ...s, isRestoring: true, error: null, success: null }));
-    setToolStatuses(new Map(tools.map(t => [t.id, 'pending'])));
 
     try {
-      // Restore Hub data first
-      restoreHubData(pendingRestore.hub);
-
-      // Restore each tool's data
-      let restoredCount = 0;
-      for (const toolData of pendingRestore.tools) {
-        const iframe = iframeRefs.current.get(toolData.toolId);
-        if (iframe) {
-          try {
-            const success = await sendRestoreToTool(iframe, toolData.toolId, toolData.data, 10000);
-            if (success) {
-              restoredCount++;
-              setToolStatuses(s => new Map(s).set(toolData.toolId, 'success'));
-            } else {
-              setToolStatuses(s => new Map(s).set(toolData.toolId, 'error'));
-            }
-          } catch {
-            setToolStatuses(s => new Map(s).set(toolData.toolId, 'error'));
-          }
-        }
-      }
+      restoreBackupData(pendingRestore);
 
       setStatus(s => ({
         ...s,
         isRestoring: false,
-        success: `Restore complete! Hub data and ${restoredCount} tool(s) restored. Please refresh the page.`,
+        success: 'Restore complete! Please refresh the page to see the restored data.',
       }));
 
       setPendingRestore(null);
@@ -193,8 +236,6 @@ export function Backup() {
       }));
     }
   }, [pendingRestore]);
-
-  const stats = pendingRestore ? getBackupStats(pendingRestore) : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -245,8 +286,8 @@ export function Backup() {
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Create Backup</h2>
           </div>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Download a comprehensive backup of all your data including activities, checklists,
-            meeting schedules, and preferences from all tools.
+            Download a backup of all your data including activities, checklists,
+            meeting schedules, and preferences.
           </p>
           <button
             onClick={handleCreateBackup}
@@ -293,49 +334,8 @@ export function Backup() {
         </div>
       </div>
 
-      {/* Tool Status during backup/restore */}
-      {(status.isCreating || status.isRestoring) && toolStatuses.size > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            {status.isCreating ? 'Backing up tools...' : 'Restoring tools...'}
-          </h3>
-          <div className="space-y-2">
-            {tools.map(tool => {
-              const toolStatus = toolStatuses.get(tool.id);
-              return (
-                <div key={tool.id} className="flex items-center justify-between py-2">
-                  <span className="text-gray-700 dark:text-gray-300">{tool.name}</span>
-                  <span className={cn(
-                    'px-2 py-1 rounded text-xs font-medium',
-                    toolStatus === 'pending' && 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
-                    toolStatus === 'success' && 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300',
-                    toolStatus === 'error' && 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
-                  )}>
-                    {toolStatus === 'pending' && 'Waiting...'}
-                    {toolStatus === 'success' && 'Done'}
-                    {toolStatus === 'error' && 'Failed'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Hidden iframes for tool communication */}
-      <div className="hidden">
-        {tools.map(tool => (
-          <iframe
-            key={tool.id}
-            ref={(el) => registerIframe(tool.id, el)}
-            src={tool.url}
-            title={`${tool.name} backup frame`}
-          />
-        ))}
-      </div>
-
       {/* Restore Confirmation Modal */}
-      {showRestoreConfirm && pendingRestore && stats && (
+      {showRestoreConfirm && pendingRestore && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
             <div className="flex items-center gap-3 mb-4">
@@ -355,19 +355,13 @@ export function Backup() {
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Backup Date:</span>
                   <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {new Date(stats.createdAt).toLocaleString()}
+                    {new Date(pendingRestore.createdAt).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Activity Links:</span>
+                  <span className="text-gray-500 dark:text-gray-400">Version:</span>
                   <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {stats.activityLinksCount}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Tools Included:</span>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {stats.toolsCount}
+                    {pendingRestore.version}
                   </span>
                 </div>
               </div>
@@ -400,14 +394,13 @@ export function Backup() {
           What's included in a backup?
         </h3>
         <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-          <li>• Activity links connecting tools together</li>
-          <li>• Project Manager: Activities, checklists, staff, and templates</li>
-          <li>• Meeting Scheduler: Projects, meetings, and participants</li>
-          <li>• Budget Tracker: Budget allocations and expense records</li>
-          <li>• Your theme and display preferences</li>
+          <li>- Activity links connecting tools together</li>
+          <li>- Project Manager: Activities, checklists, and templates</li>
+          <li>- Meeting Scheduler: Projects, meetings, and participants</li>
+          <li>- Your theme and display preferences</li>
         </ul>
         <p className="text-xs text-blue-600 dark:text-blue-400 mt-3">
-          Tip: Create regular backups before making major changes to protect your data.
+          Note: Budget Tracker data is stored in the cloud and is not included in local backups.
         </p>
       </div>
     </div>

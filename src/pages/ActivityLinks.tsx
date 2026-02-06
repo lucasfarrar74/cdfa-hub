@@ -6,8 +6,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { ActivityLinkCard } from '../components/linking/ActivityLinkCard';
 import { CreateActivityModal } from '../components/linking/CreateActivityModal';
-import { useProjectBridge, getMeetingSchedulerIframeUrl } from '../hooks/useProjectBridge';
-import { useActivityBridge, getProjectManagerIframeUrl } from '../hooks/useActivityBridge';
+import { useProjects } from '../features/projects/context/ProjectsContext';
+import { useSchedule } from '../features/scheduler/context/ScheduleContext';
 import type { ActivityLink, ActivityLinkFormData } from '../types/linking';
 import { ACTIVITY_LINKS_STORAGE_KEY } from '../types/linking';
 
@@ -42,9 +42,10 @@ export function ActivityLinks() {
   const [activityLinks, setActivityLinks] = useState<ActivityLink[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [creatingScheduleForId, setCreatingScheduleForId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const { isReady, isCreating, error, createProject, iframeRef } = useProjectBridge();
-  const { createActivity: createPMActivity, iframeRef: pmIframeRef } = useActivityBridge();
+  const { createActivity } = useProjects();
+  const { createProject, setEventConfig } = useSchedule();
 
   // Load activity links on mount
   useEffect(() => {
@@ -60,8 +61,10 @@ export function ActivityLinks() {
 
   const handleAddActivity = useCallback(async (formData: ActivityLinkFormData) => {
     const now = new Date().toISOString();
+    const linkId = generateId();
+
     const newLink: ActivityLink = {
-      id: generateId(),
+      id: linkId,
       ...formData,
       createdAt: now,
       updatedAt: now,
@@ -70,9 +73,21 @@ export function ActivityLinks() {
     setActivityLinks(prev => [...prev, newLink]);
     setIsModalOpen(false);
 
-    // Also create the activity in Project Manager (fire and forget)
-    createPMActivity(newLink);
-  }, [createPMActivity]);
+    // Also create the activity in Project Manager
+    try {
+      createActivity({
+        name: formData.name,
+        type: formData.type,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        location: formData.location,
+        description: formData.description,
+        status: 'planning',
+      });
+    } catch (err) {
+      console.error('Failed to create activity in Project Manager:', err);
+    }
+  }, [createActivity]);
 
   const handleDeleteActivity = useCallback((activityId: string) => {
     if (!window.confirm('Are you sure you want to delete this activity link?')) {
@@ -88,29 +103,48 @@ export function ActivityLinks() {
 
   const handleCreateMeetingSchedule = useCallback(async (activity: ActivityLink) => {
     setCreatingScheduleForId(activity.id);
+    setError(null);
 
-    const result = await createProject(activity);
+    try {
+      // Create a project in Meeting Scheduler
+      const project = createProject(activity.name, { cdfaActivityId: activity.id });
 
-    if (result) {
-      // Update the activity link with the Meeting Scheduler project info
-      setActivityLinks(prev => {
-        const updated = prev.map(a =>
-          a.id === activity.id
-            ? {
-                ...a,
-                meetingSchedulerProjectId: result.projectId,
-                meetingSchedulerShareId: result.shareId,
-                updatedAt: new Date().toISOString(),
-              }
-            : a
-        );
-        saveActivityLinks(updated);
-        return updated;
-      });
+      if (project) {
+        // Set the event config with dates from the activity
+        setEventConfig({
+          id: crypto.randomUUID(),
+          name: activity.name,
+          startDate: activity.startDate,
+          endDate: activity.endDate || activity.startDate,
+          startTime: '09:00',
+          endTime: '17:00',
+          defaultMeetingDuration: 30,
+          breaks: [],
+          schedulingStrategy: 'efficient',
+        });
+
+        // Update the activity link with the Meeting Scheduler project info
+        setActivityLinks(prev => {
+          const updated = prev.map(a =>
+            a.id === activity.id
+              ? {
+                  ...a,
+                  meetingSchedulerProjectId: project.id,
+                  meetingSchedulerShareId: project.shareId,
+                  updatedAt: new Date().toISOString(),
+                }
+              : a
+          );
+          saveActivityLinks(updated);
+          return updated;
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create meeting schedule');
+    } finally {
+      setCreatingScheduleForId(null);
     }
-
-    setCreatingScheduleForId(null);
-  }, [createProject]);
+  }, [createProject, setEventConfig]);
 
   return (
     <div className="max-w-6xl mx-auto p-6">
@@ -144,18 +178,6 @@ export function ActivityLinks() {
         </div>
       )}
 
-      {/* Connection status */}
-      {!isReady && (
-        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-amber-700 dark:text-amber-400">
-              Connecting to Meeting Scheduler...
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Activity list */}
       {activityLinks.length === 0 ? (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-12 text-center">
@@ -184,7 +206,7 @@ export function ActivityLinks() {
               activity={activity}
               onCreateMeetingSchedule={handleCreateMeetingSchedule}
               onDelete={handleDeleteActivity}
-              isCreatingSchedule={creatingScheduleForId === activity.id || (isCreating && creatingScheduleForId === activity.id)}
+              isCreatingSchedule={creatingScheduleForId === activity.id}
             />
           ))}
         </div>
@@ -195,34 +217,6 @@ export function ActivityLinks() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleAddActivity}
-      />
-
-      {/* Hidden iframe for Meeting Scheduler communication */}
-      <iframe
-        ref={iframeRef}
-        src={getMeetingSchedulerIframeUrl()}
-        title="Meeting Scheduler Bridge"
-        style={{
-          position: 'absolute',
-          width: '1px',
-          height: '1px',
-          left: '-9999px',
-          top: '-9999px',
-        }}
-      />
-
-      {/* Hidden iframe for Project Manager communication */}
-      <iframe
-        ref={pmIframeRef}
-        src={getProjectManagerIframeUrl()}
-        title="Project Manager Bridge"
-        style={{
-          position: 'absolute',
-          width: '1px',
-          height: '1px',
-          left: '-9999px',
-          top: '-9999px',
-        }}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -18,7 +18,7 @@ import {
   type MappedSupplier,
 } from '../utils/excelParser';
 import { cn } from '../lib/utils';
-import { getToolById } from '../config/tools';
+import { useSchedule } from '../features/scheduler/context/ScheduleContext';
 
 type ImportStep = 'upload' | 'map' | 'preview' | 'complete';
 
@@ -36,46 +36,8 @@ export function DataImport() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const importTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const meetingSchedulerTool = getToolById('meeting-scheduler');
-
-  // Listen for import results from Meeting Scheduler
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const data = event.data;
-
-      if (data?.type === 'CDFA_IMPORT_RESULT') {
-        // Clear timeout
-        if (importTimeoutRef.current) {
-          clearTimeout(importTimeoutRef.current);
-          importTimeoutRef.current = null;
-        }
-
-        setImportResult({
-          success: data.success,
-          importedCount: data.importedCount,
-          error: data.error,
-        });
-        if (data.success) {
-          setCurrentStep('complete');
-        } else {
-          setError(data.error || 'Import failed');
-        }
-        setIsLoading(false);
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      if (importTimeoutRef.current) {
-        clearTimeout(importTimeoutRef.current);
-      }
-    };
-  }, []);
+  const { importSuppliers } = useSchedule();
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsLoading(true);
@@ -112,46 +74,34 @@ export function DataImport() {
   }, [parseResult, columnMapping]);
 
   const handleImport = useCallback(() => {
-    if (!iframeRef.current?.contentWindow || mappedSuppliers.length === 0) {
+    if (mappedSuppliers.length === 0) {
       setError('No suppliers to import');
-      return;
-    }
-
-    if (!iframeLoaded) {
-      setError('Meeting Scheduler is still loading. Please wait a moment and try again.');
       return;
     }
 
     setIsLoading(true);
     setError(null);
 
-    // Set timeout for import response (10 seconds)
-    importTimeoutRef.current = setTimeout(() => {
-      setError('Import request timed out. The Meeting Scheduler may not be responding.');
-      setIsLoading(false);
-    }, 10000);
-
-    // Send import message to Meeting Scheduler
-    const message = {
-      type: 'CDFA_IMPORT',
-      action: 'IMPORT_SUPPLIERS',
-      payload: {
-        suppliers: mappedSuppliers,
-        mode: 'replace' as const,
-      },
-    };
-
     try {
-      iframeRef.current.contentWindow.postMessage(message, '*');
+      // Import directly to the Meeting Scheduler context
+      importSuppliers(mappedSuppliers);
+
+      setImportResult({
+        success: true,
+        importedCount: mappedSuppliers.length,
+      });
+      setCurrentStep('complete');
     } catch (err) {
-      if (importTimeoutRef.current) {
-        clearTimeout(importTimeoutRef.current);
-        importTimeoutRef.current = null;
-      }
-      setError('Failed to communicate with Meeting Scheduler');
+      setImportResult({
+        success: false,
+        importedCount: 0,
+        error: err instanceof Error ? err.message : 'Import failed',
+      });
+      setError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
       setIsLoading(false);
     }
-  }, [mappedSuppliers, iframeLoaded]);
+  }, [mappedSuppliers, importSuppliers]);
 
   const handleBack = useCallback(() => {
     switch (currentStep) {
@@ -398,10 +348,10 @@ export function DataImport() {
             {currentStep === 'preview' && (
               <button
                 onClick={handleImport}
-                disabled={isLoading || mappedSuppliers.length === 0 || !iframeLoaded}
+                disabled={isLoading || mappedSuppliers.length === 0}
                 className={cn(
                   "flex items-center gap-2 px-6 py-2 rounded-lg transition-colors",
-                  isLoading || mappedSuppliers.length === 0 || !iframeLoaded
+                  isLoading || mappedSuppliers.length === 0
                     ? "text-gray-400 bg-gray-100 dark:bg-gray-700 cursor-not-allowed"
                     : "text-white bg-green-600 hover:bg-green-700"
                 )}
@@ -410,11 +360,6 @@ export function DataImport() {
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     Importing...
-                  </>
-                ) : !iframeLoaded ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                    Connecting...
                   </>
                 ) : (
                   <>
@@ -427,23 +372,6 @@ export function DataImport() {
           </div>
         )}
       </div>
-
-      {/* Hidden iframe for communication with Meeting Scheduler */}
-      {meetingSchedulerTool && (
-        <iframe
-          ref={iframeRef}
-          src={meetingSchedulerTool.url}
-          title="Meeting Scheduler Bridge"
-          onLoad={() => setIframeLoaded(true)}
-          style={{
-            position: 'absolute',
-            width: '1px',
-            height: '1px',
-            left: '-9999px',
-            top: '-9999px',
-          }}
-        />
-      )}
     </div>
   );
 }

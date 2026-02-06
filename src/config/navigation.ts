@@ -1,8 +1,4 @@
-import type { NavigationItem, QuickAction, WidgetConfig } from '../types';
-
-// Legacy URLs for iframe fallbacks (no longer used for Project Manager or Meeting Scheduler)
-const isDev = import.meta.env.DEV;
-const projectManagerUrl = isDev ? 'http://localhost:5179' : 'https://cdfa-project-manager.vercel.app';
+import type { NavigationItem, QuickAction } from '../types';
 
 export const navigationItems: NavigationItem[] = [
   {
@@ -24,14 +20,6 @@ export const navigationItems: NavigationItem[] = [
       { id: 'projects-calendar', label: 'Calendar', path: '/projects/calendar' },
       { id: 'projects-timeline', label: 'Timeline', path: '/projects/timeline' },
     ],
-  },
-  {
-    id: 'project-manager-iframe',
-    label: 'Project Manager (Legacy)',
-    path: '/project-manager',
-    icon: 'clipboard-document-list',
-    section: 'tools',
-    hidden: true,
   },
   {
     id: 'meeting-scheduler',
@@ -118,29 +106,5 @@ export const quickActions: QuickAction[] = [
     url: '/activity-links',
     icon: 'link',
     internal: true,
-  },
-];
-
-export const dashboardWidgets: WidgetConfig[] = [
-  {
-    id: 'widget-pm',
-    toolId: 'project-manager',
-    title: 'Project Manager',
-    gridSpan: 'half',
-    minHeight: 400,
-  },
-  {
-    id: 'widget-ms',
-    toolId: 'meeting-scheduler',
-    title: 'Meeting Scheduler',
-    gridSpan: 'half',
-    minHeight: 400,
-  },
-  {
-    id: 'widget-bt',
-    toolId: 'budget-tracker',
-    title: 'Budget Tracker',
-    gridSpan: 'full',
-    minHeight: 350,
   },
 ];

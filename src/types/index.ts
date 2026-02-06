@@ -32,11 +32,3 @@ export interface QuickAction {
   icon: string;
   internal?: boolean;
 }
-
-export interface WidgetConfig {
-  id: string;
-  toolId: string;
-  title: string;
-  gridSpan: 'half' | 'full';
-  minHeight: number;
-}
