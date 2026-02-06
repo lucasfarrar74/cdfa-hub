@@ -34,6 +34,14 @@ export interface Participant {
   organization: string | null;
   activity_id: number | null;
   is_archived: boolean;
+  created_at: string;
+}
+
+export interface CreateParticipantInput {
+  name: string;
+  email?: string;
+  organization?: string;
+  activity_id?: number | null;
 }
 
 export interface Expense {

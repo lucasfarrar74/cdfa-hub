@@ -13,12 +13,14 @@ import type {
   Income,
   Cooperator,
   ExpenseCategory,
+  Participant,
   DashboardSummary,
   ActivityFinancials,
   CreateActivityInput,
   UpdateActivityInput,
   CreateExpenseInput,
   CreateIncomeInput,
+  CreateParticipantInput,
   ExpenseTemplate,
 } from '../types';
 import {
@@ -27,6 +29,7 @@ import {
   sampleActivities,
   sampleExpenses,
   sampleIncome,
+  sampleParticipants,
   INITIAL_NEXT_ID,
 } from '../data/sampleData';
 
@@ -44,6 +47,7 @@ interface BudgetState {
   dashboardSummary: DashboardSummary | null;
   allExpenses: Record<number, Expense[]>;
   allIncome: Record<number, Income[]>;
+  participants: Participant[];
   templates: ExpenseTemplate[];
   selectedActivityId: number | null;
   nextId: number;
@@ -82,6 +86,9 @@ type BudgetAction =
   | { type: 'ADD_CATEGORY'; payload: ExpenseCategory }
   | { type: 'UPDATE_CATEGORY'; payload: { id: number; updates: Partial<ExpenseCategory> } }
   | { type: 'DELETE_CATEGORY'; payload: number }
+  | { type: 'ADD_PARTICIPANT'; payload: Participant }
+  | { type: 'UPDATE_PARTICIPANT'; payload: { id: number; updates: Partial<Participant> } }
+  | { type: 'DELETE_PARTICIPANT'; payload: number }
   | { type: 'SET_TEMPLATES'; payload: ExpenseTemplate[] }
   | { type: 'ADD_TEMPLATE'; payload: ExpenseTemplate }
   | { type: 'UPDATE_TEMPLATE'; payload: { id: number; updates: Partial<ExpenseTemplate> } }
@@ -93,6 +100,7 @@ interface PersistedState {
   allIncome: Record<number, Income[]>;
   cooperators: Cooperator[];
   categories: ExpenseCategory[];
+  participants?: Participant[];
   templates?: ExpenseTemplate[];
   nextId: number;
 }
@@ -107,6 +115,7 @@ const initialState: BudgetState = {
   dashboardSummary: null,
   allExpenses: {},
   allIncome: {},
+  participants: [],
   templates: [],
   selectedActivityId: null,
   nextId: INITIAL_NEXT_ID,
@@ -411,6 +420,29 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         categories: state.categories.filter(c => c.id !== action.payload),
       };
 
+    case 'ADD_PARTICIPANT':
+      return {
+        ...state,
+        participants: [...state.participants, action.payload],
+        nextId: state.nextId + 1,
+      };
+
+    case 'UPDATE_PARTICIPANT': {
+      const { id, updates } = action.payload;
+      return {
+        ...state,
+        participants: state.participants.map(p =>
+          p.id === id ? { ...p, ...updates } : p
+        ),
+      };
+    }
+
+    case 'DELETE_PARTICIPANT':
+      return {
+        ...state,
+        participants: state.participants.filter(p => p.id !== action.payload),
+      };
+
     case 'SET_TEMPLATES':
       return { ...state, templates: action.payload };
 
@@ -445,6 +477,7 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         allIncome: action.payload.allIncome,
         cooperators: action.payload.cooperators,
         categories: action.payload.categories,
+        participants: action.payload.participants ?? [],
         templates: action.payload.templates ?? [],
         nextId: action.payload.nextId,
       };
@@ -482,6 +515,11 @@ interface BudgetContextType extends BudgetState {
   createCategory: (data: Partial<ExpenseCategory>) => ExpenseCategory;
   updateCategory: (id: number, updates: Partial<ExpenseCategory>) => void;
   deleteCategory: (id: number) => boolean;
+  createParticipant: (data: CreateParticipantInput) => Participant;
+  updateParticipant: (id: number, updates: Partial<Participant>) => void;
+  archiveParticipant: (id: number) => void;
+  unarchiveParticipant: (id: number) => void;
+  deleteParticipant: (id: number) => void;
   createTemplate: (data: Omit<ExpenseTemplate, 'id'>) => ExpenseTemplate;
   updateTemplate: (id: number, updates: Partial<ExpenseTemplate>) => void;
   deleteTemplate: (id: number) => void;
@@ -517,6 +555,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: sampleIncome,
       cooperators: sampleCooperators,
       categories: sampleCategories,
+      participants: sampleParticipants,
       nextId: INITIAL_NEXT_ID,
     };
     dispatch({ type: 'LOAD_STATE', payload: sampleState });
@@ -532,11 +571,12 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: state.allIncome,
       cooperators: state.cooperators,
       categories: state.categories,
+      participants: state.participants,
       templates: state.templates,
       nextId: state.nextId,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.templates, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.nextId]);
 
   // Auto-compute dashboard summary when activities change
   useEffect(() => {
@@ -1069,6 +1109,51 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     return true;
   }, [state.allExpenses]);
 
+  const createParticipant = useCallback((data: CreateParticipantInput): Participant => {
+    const participant: Participant = {
+      id: state.nextId,
+      name: data.name,
+      email: data.email || null,
+      organization: data.organization || null,
+      activity_id: data.activity_id ?? null,
+      is_archived: false,
+      created_at: new Date().toISOString(),
+    };
+    dispatch({ type: 'ADD_PARTICIPANT', payload: participant });
+    return participant;
+  }, [state.nextId]);
+
+  const updateParticipant = useCallback((id: number, updates: Partial<Participant>) => {
+    dispatch({ type: 'UPDATE_PARTICIPANT', payload: { id, updates } });
+  }, []);
+
+  const archiveParticipant = useCallback((id: number) => {
+    dispatch({ type: 'UPDATE_PARTICIPANT', payload: { id, updates: { is_archived: true } } });
+  }, []);
+
+  const unarchiveParticipant = useCallback((id: number) => {
+    dispatch({ type: 'UPDATE_PARTICIPANT', payload: { id, updates: { is_archived: false } } });
+  }, []);
+
+  const deleteParticipant = useCallback((id: number) => {
+    dispatch({ type: 'DELETE_PARTICIPANT', payload: id });
+    // Remove from any expenses
+    Object.entries(state.allExpenses).forEach(([activityId, expenses]) => {
+      expenses.forEach(e => {
+        if (e.participants.some(p => p.id === id)) {
+          dispatch({
+            type: 'UPDATE_EXPENSE',
+            payload: {
+              activityId: Number(activityId),
+              expenseId: e.id,
+              updates: { participants: e.participants.filter(p => p.id !== id) },
+            },
+          });
+        }
+      });
+    });
+  }, [state.allExpenses]);
+
   const createTemplate = useCallback((data: Omit<ExpenseTemplate, 'id'>): ExpenseTemplate => {
     const template: ExpenseTemplate = { id: state.nextId, ...data };
     dispatch({ type: 'ADD_TEMPLATE', payload: template });
@@ -1099,6 +1184,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: sampleIncome,
       cooperators: sampleCooperators,
       categories: sampleCategories,
+      participants: sampleParticipants,
       nextId: INITIAL_NEXT_ID,
     };
     dispatch({ type: 'LOAD_STATE', payload: sampleState });
@@ -1111,11 +1197,12 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: state.allIncome,
       cooperators: state.cooperators,
       categories: state.categories,
+      participants: state.participants,
       templates: state.templates,
       nextId: state.nextId,
     };
     return JSON.stringify(data, null, 2);
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.templates, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.nextId]);
 
   const importFromJSON = useCallback((json: string): boolean => {
     try {
@@ -1165,6 +1252,11 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         createCategory,
         updateCategory,
         deleteCategory,
+        createParticipant,
+        updateParticipant,
+        archiveParticipant,
+        unarchiveParticipant,
+        deleteParticipant,
         createTemplate,
         updateTemplate,
         deleteTemplate,

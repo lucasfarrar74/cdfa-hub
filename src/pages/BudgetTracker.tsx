@@ -1,8 +1,18 @@
 import { useState } from 'react';
 import { BudgetProvider } from '../features/budget/context/BudgetContext';
-import { Dashboard, ActivityList, ReportsView, SettingsView } from '../features/budget/components';
+import {
+  Dashboard,
+  ActivityList,
+  ExpensesPage,
+  IncomePage,
+  CooperatorsPage,
+  ParticipantsPage,
+  CategoriesPage,
+  ReportsView,
+  SettingsView,
+} from '../features/budget/components';
 
-type Tab = 'dashboard' | 'activities' | 'reports' | 'settings';
+type Tab = 'dashboard' | 'activities' | 'expenses' | 'income' | 'cooperators' | 'participants' | 'categories' | 'reports' | 'settings';
 
 function BudgetContent() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -11,6 +21,11 @@ function BudgetContent() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'activities', label: 'Activities' },
+    { id: 'expenses', label: 'Expenses' },
+    { id: 'income', label: 'Income' },
+    { id: 'cooperators', label: 'Cooperators' },
+    { id: 'participants', label: 'Participants' },
+    { id: 'categories', label: 'Categories' },
     { id: 'reports', label: 'Reports' },
     { id: 'settings', label: 'Settings' },
   ];
@@ -18,6 +33,11 @@ function BudgetContent() {
   const handleNavigateToActivities = (cooperatorId?: number) => {
     setCooperatorFilter(cooperatorId);
     setActiveTab('activities');
+  };
+
+  const handleNavigateToReports = (cooperatorId?: number) => {
+    setCooperatorFilter(cooperatorId);
+    setActiveTab('reports');
   };
 
   return (
@@ -37,7 +57,7 @@ function BudgetContent() {
       {/* Tabs */}
       <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="px-4">
-          <div className="flex space-x-1">
+          <div className="flex space-x-1 overflow-x-auto">
             {tabs.map(tab => (
               <button
                 key={tab.id}
@@ -45,7 +65,7 @@ function BudgetContent() {
                   setActiveTab(tab.id);
                   if (tab.id !== 'activities') setCooperatorFilter(undefined);
                 }}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
@@ -62,6 +82,16 @@ function BudgetContent() {
       <main className="flex-1 p-4 overflow-auto bg-gray-50 dark:bg-gray-900">
         {activeTab === 'dashboard' && <Dashboard onNavigateToActivities={handleNavigateToActivities} />}
         {activeTab === 'activities' && <ActivityList initialCooperatorFilter={cooperatorFilter} />}
+        {activeTab === 'expenses' && <ExpensesPage />}
+        {activeTab === 'income' && <IncomePage />}
+        {activeTab === 'cooperators' && (
+          <CooperatorsPage
+            onNavigateToActivities={handleNavigateToActivities}
+            onNavigateToReports={handleNavigateToReports}
+          />
+        )}
+        {activeTab === 'participants' && <ParticipantsPage />}
+        {activeTab === 'categories' && <CategoriesPage />}
         {activeTab === 'reports' && <ReportsView />}
         {activeTab === 'settings' && <SettingsView />}
       </main>

@@ -15,7 +15,7 @@ function parseCurrency(value: string): number | undefined {
 }
 
 export default function ExpenseForm({ activityId, expense, onClose, onSaved }: ExpenseFormProps) {
-  const { categories, templates, createExpense, updateExpense } = useBudget();
+  const { categories, templates, participants, createExpense, updateExpense } = useBudget();
   const isEdit = !!expense;
 
   const [categoryId, setCategoryId] = useState<number | ''>(expense?.category_id || '');
@@ -26,7 +26,15 @@ export default function ExpenseForm({ activityId, expense, onClose, onSaved }: E
   const [actualDate, setActualDate] = useState(expense?.actual_date || '');
   const [receiptReference, setReceiptReference] = useState(expense?.receipt_reference || '');
   const [notes, setNotes] = useState(expense?.notes || '');
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<number[]>(
+    expense?.participants?.map(p => p.id) || []
+  );
   const [saving, setSaving] = useState(false);
+
+  // Get eligible participants: global or scoped to this activity, and not archived
+  const eligibleParticipants = participants.filter(
+    p => !p.is_archived && (p.activity_id === null || p.activity_id === activityId)
+  );
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -56,6 +64,7 @@ export default function ExpenseForm({ activityId, expense, onClose, onSaved }: E
         if (aa !== undefined && pa !== undefined) status = 'partial';
         else if (aa !== undefined) status = 'actual';
 
+        const selectedParticipants = participants.filter(p => selectedParticipantIds.includes(p.id));
         updateExpense(activityId, expense.id, {
           category_id: Number(categoryId),
           category_name: categories.find(c => c.id === Number(categoryId))?.name || expense.category_name,
@@ -67,6 +76,7 @@ export default function ExpenseForm({ activityId, expense, onClose, onSaved }: E
           receipt_reference: receiptReference.trim() || null,
           notes: notes.trim() || null,
           status,
+          participants: selectedParticipants,
         });
       } else {
         const data: CreateExpenseInput = {
@@ -78,8 +88,14 @@ export default function ExpenseForm({ activityId, expense, onClose, onSaved }: E
           actual_date: actualDate || undefined,
           receipt_reference: receiptReference.trim() || undefined,
           notes: notes.trim() || undefined,
+          participant_ids: selectedParticipantIds.length > 0 ? selectedParticipantIds : undefined,
         };
-        await createExpense(activityId, data);
+        const newExpense = await createExpense(activityId, data);
+        // Update participants on the new expense
+        if (newExpense && selectedParticipantIds.length > 0) {
+          const selectedParticipants = participants.filter(p => selectedParticipantIds.includes(p.id));
+          updateExpense(activityId, newExpense.id, { participants: selectedParticipants });
+        }
       }
       onSaved?.();
       onClose();
@@ -167,6 +183,32 @@ export default function ExpenseForm({ activityId, expense, onClose, onSaved }: E
             <label className={labelCls}>Notes</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} className={inputCls} rows={2} />
           </div>
+
+          {eligibleParticipants.length > 0 && (
+            <div>
+              <label className={labelCls}>Participants</label>
+              <div className="max-h-32 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2 space-y-1">
+                {eligibleParticipants.map(p => (
+                  <label key={p.id} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded px-1 py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedParticipantIds.includes(p.id)}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedParticipantIds([...selectedParticipantIds, p.id]);
+                        } else {
+                          setSelectedParticipantIds(selectedParticipantIds.filter(id => id !== p.id));
+                        }
+                      }}
+                      className="rounded border-gray-300 dark:border-gray-600"
+                    />
+                    <span>{p.name}</span>
+                    {p.organization && <span className="text-xs text-gray-400">({p.organization})</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">
