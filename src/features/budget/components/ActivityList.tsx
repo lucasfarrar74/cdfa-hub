@@ -23,9 +23,9 @@ function formatDate(dateString: string | null): string {
 
 function StatusBadge({ status }: { status: ActivityStatus }) {
   const styles = {
-    planning: 'bg-gray-100 text-gray-800',
-    active: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
+    planning: 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200',
+    active: 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200',
+    completed: 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200',
   };
 
   return (
@@ -37,9 +37,9 @@ function StatusBadge({ status }: { status: ActivityStatus }) {
 
 function BudgetStatusBadge({ status }: { status: BudgetStatus }) {
   const styles = {
-    under: 'bg-green-100 text-green-800',
-    near: 'bg-amber-100 text-amber-800',
-    over: 'bg-red-100 text-red-800',
+    under: 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200',
+    near: 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200',
+    over: 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200',
   };
 
   const labels = {
@@ -90,13 +90,13 @@ export default function ActivityList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Activities</h1>
-          <p className="text-gray-600 mt-1">Manage activity budgets and expenses</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Activities</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">Manage activity budgets and expenses</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
         <div className="flex flex-wrap gap-4">
           <div className="flex-1 min-w-[200px]">
             <input
@@ -104,13 +104,13 @@ export default function ActivityList() {
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search activities..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value as ActivityStatus | '')}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">All Statuses</option>
             <option value="planning">Planning</option>
@@ -120,7 +120,7 @@ export default function ActivityList() {
           <select
             value={cooperatorFilter}
             onChange={e => setCooperatorFilter(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">All Cooperators</option>
             {cooperators.map(c => (
@@ -132,8 +132,10 @@ export default function ActivityList() {
 
       {/* Error State */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">{error}</p>
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+          <p className="text-amber-800 dark:text-amber-200 text-sm">
+            Budget Tracker backend is not connected. Start the Flask server to sync activity data.
+          </p>
         </div>
       )}
 
@@ -142,45 +144,48 @@ export default function ActivityList() {
         <div className="flex items-center justify-center h-64">
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-500 text-sm">Loading activities...</p>
+            <p className="text-gray-500 dark:text-gray-400 text-sm">Loading activities...</p>
           </div>
         </div>
       )}
 
       {/* Activity List */}
       {!isLoading && filteredActivities.length === 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <p className="text-gray-500">No activities found matching your filters.</p>
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">No activities found.</p>
+          {error && (
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">Activity data will appear here when the Flask backend is running.</p>
+          )}
         </div>
       )}
 
       {filteredActivities.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm dark:shadow-gray-900/50 overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Activity</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Cooperator</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Dates</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700">Budget</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700">Committed</th>
-                <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Health</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Activity</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Cooperator</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Dates</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
+                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Budget</th>
+                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Committed</th>
+                <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Health</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {filteredActivities.map(activity => (
-                <tr key={activity.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={activity.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <td className="px-4 py-3">
                     <div>
-                      <p className="font-medium text-gray-900">{activity.name}</p>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">{activity.name}</p>
                       {activity.location && (
-                        <p className="text-sm text-gray-500">{activity.location}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{activity.location}</p>
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{activity.cooperator_name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{activity.cooperator_name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
                     {formatDate(activity.start_date)}
                     {activity.end_date && activity.end_date !== activity.start_date && (
                       <> - {formatDate(activity.end_date)}</>
@@ -189,14 +194,14 @@ export default function ActivityList() {
                   <td className="px-4 py-3">
                     <StatusBadge status={activity.status} />
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">
+                  <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-gray-100">
                     {formatCurrency(activity.budget)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <p className="font-medium text-gray-900">
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
                       {formatCurrency(activity.net_committed)}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
                       {activity.budget > 0
                         ? `${Math.round((activity.net_committed / activity.budget) * 100)}%`
                         : '0%'}

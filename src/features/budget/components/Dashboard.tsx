@@ -22,10 +22,10 @@ function StatCard({
   color?: 'blue' | 'green' | 'amber' | 'red';
 }) {
   const colorClasses = {
-    blue: 'bg-blue-50 text-blue-700 border-blue-200',
-    green: 'bg-green-50 text-green-700 border-green-200',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
+    blue: 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+    green: 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
+    amber: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    red: 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
   };
 
   return (
@@ -39,9 +39,9 @@ function StatCard({
 
 function BudgetStatusBadge({ status }: { status: 'under' | 'near' | 'over' }) {
   const styles = {
-    under: 'bg-green-100 text-green-800',
-    near: 'bg-amber-100 text-amber-800',
-    over: 'bg-red-100 text-red-800',
+    under: 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200',
+    near: 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200',
+    over: 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200',
   };
 
   const labels = {
@@ -73,7 +73,7 @@ export default function Dashboard() {
     // Set a timeout to show empty state if backend doesn't respond
     const timeout = setTimeout(() => {
       setHasAttemptedLoad(true);
-    }, 3000); // 3 second timeout
+    }, 1000); // 1 second timeout
 
     const load = async () => {
       try {
@@ -96,7 +96,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-center h-64">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-500 text-sm">Loading budget data...</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Loading budget data...</p>
         </div>
       </div>
     );
@@ -163,29 +163,29 @@ export default function Dashboard() {
             <p className="text-sm mt-2">Budget tracking data will appear here when the Flask backend is running.</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
             {activities.slice(0, 10).map(activity => (
               <div
                 key={activity.id}
-                className="px-4 py-3 hover:bg-gray-50 transition-colors"
+                className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-medium text-gray-900 truncate">
+                      <h3 className="font-medium text-gray-900 dark:text-gray-100 truncate">
                         {activity.name}
                       </h3>
                       <BudgetStatusBadge status={activity.budget_status} />
                     </div>
-                    <p className="text-sm text-gray-500 mt-0.5">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                       {activity.cooperator_name} &middot; {activity.status}
                     </p>
                   </div>
                   <div className="text-right ml-4">
-                    <p className="font-medium text-gray-900">
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
                       {formatCurrency(activity.net_committed)}
                     </p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       of {formatCurrency(activity.budget)}
                     </p>
                   </div>
@@ -193,7 +193,7 @@ export default function Dashboard() {
 
                 {/* Budget Progress Bar */}
                 <div className="mt-2">
-                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${
                         activity.budget_status === 'over'
