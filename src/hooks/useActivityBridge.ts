@@ -72,17 +72,15 @@ export function useActivityBridge(): UseActivityBridgeResult {
   }, []);
 
   const createActivity = useCallback(async (activity: ActivityLink): Promise<{ activityId: string } | null> => {
-    console.log('[useActivityBridge] createActivity called, isReady:', isReady, 'hasIframe:', !!iframeRef.current?.contentWindow);
+    console.log('[useActivityBridge] createActivity called, hasIframe:', !!iframeRef.current?.contentWindow);
 
     if (!iframeRef.current?.contentWindow) {
       console.log('[useActivityBridge] No iframe contentWindow - skipping');
       return null;
     }
 
-    if (!isReady) {
-      console.log('[useActivityBridge] Not ready - skipping');
-      return null;
-    }
+    // Don't require READY signal - just try to send the message
+    // The timeout will handle cases where Project Manager doesn't respond
 
     setIsCreating(true);
     setError(null);
