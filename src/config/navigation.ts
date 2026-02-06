@@ -3,7 +3,7 @@ import type { NavigationItem, QuickAction } from '../types';
 export const navigationItems: NavigationItem[] = [
   {
     id: 'dashboard',
-    label: 'Dashboard',
+    label: 'Home',
     path: '/',
     icon: 'home',
     section: 'main',
@@ -15,7 +15,7 @@ export const navigationItems: NavigationItem[] = [
     icon: 'clipboard-document-list',
     section: 'tools',
     children: [
-      { id: 'projects-dashboard', label: 'Dashboard', path: '/projects' },
+      { id: 'projects-dashboard', label: 'Overview', path: '/projects' },
       { id: 'projects-activities', label: 'Activities', path: '/projects/activities' },
       { id: 'projects-calendar', label: 'Calendar', path: '/projects/calendar' },
       { id: 'projects-timeline', label: 'Timeline', path: '/projects/timeline' },

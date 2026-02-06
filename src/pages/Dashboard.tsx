@@ -9,7 +9,7 @@ export function Dashboard() {
     <div className="space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Home</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           At-a-glance view of your projects, deadlines, and budgets
         </p>
