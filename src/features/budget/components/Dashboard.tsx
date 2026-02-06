@@ -60,9 +60,10 @@ function BudgetStatusBadge({ status }: { status: 'under' | 'near' | 'over' }) {
 
 interface DashboardProps {
   onNavigateToActivities?: (cooperatorId?: number) => void;
+  onNavigateToActivity?: (activityId: number) => void;
 }
 
-export default function Dashboard({ onNavigateToActivities }: DashboardProps) {
+export default function Dashboard({ onNavigateToActivities, onNavigateToActivity }: DashboardProps) {
   const {
     dashboardSummary,
     activities,
@@ -202,7 +203,8 @@ export default function Dashboard({ onNavigateToActivities }: DashboardProps) {
               {activities.slice(0, 10).map(activity => (
                 <div
                   key={activity.id}
-                  className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  onClick={() => onNavigateToActivity?.(activity.id)}
+                  className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">

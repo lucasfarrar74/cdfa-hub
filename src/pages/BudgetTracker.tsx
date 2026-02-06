@@ -1,31 +1,22 @@
 import { useState } from 'react';
-import { BudgetProvider } from '../features/budget/context/BudgetContext';
+import { BudgetProvider, useBudget } from '../features/budget/context/BudgetContext';
 import {
   Dashboard,
   ActivityList,
-  ExpensesPage,
-  IncomePage,
-  CooperatorsPage,
-  ParticipantsPage,
-  CategoriesPage,
   ReportsView,
   SettingsView,
 } from '../features/budget/components';
 
-type Tab = 'dashboard' | 'activities' | 'expenses' | 'income' | 'cooperators' | 'participants' | 'categories' | 'reports' | 'settings';
+type Tab = 'dashboard' | 'activities' | 'reports' | 'settings';
 
 function BudgetContent() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [cooperatorFilter, setCooperatorFilter] = useState<number | undefined>();
+  const { selectActivity } = useBudget();
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'activities', label: 'Activities' },
-    { id: 'expenses', label: 'Expenses' },
-    { id: 'income', label: 'Income' },
-    { id: 'cooperators', label: 'Cooperators' },
-    { id: 'participants', label: 'Participants' },
-    { id: 'categories', label: 'Categories' },
     { id: 'reports', label: 'Reports' },
     { id: 'settings', label: 'Settings' },
   ];
@@ -35,9 +26,9 @@ function BudgetContent() {
     setActiveTab('activities');
   };
 
-  const handleNavigateToReports = (cooperatorId?: number) => {
-    setCooperatorFilter(cooperatorId);
-    setActiveTab('reports');
+  const handleNavigateToActivity = (activityId: number) => {
+    selectActivity(activityId);
+    setActiveTab('activities');
   };
 
   return (
@@ -80,18 +71,13 @@ function BudgetContent() {
 
       {/* Content */}
       <main className="flex-1 p-4 overflow-auto bg-gray-50 dark:bg-gray-900">
-        {activeTab === 'dashboard' && <Dashboard onNavigateToActivities={handleNavigateToActivities} />}
-        {activeTab === 'activities' && <ActivityList initialCooperatorFilter={cooperatorFilter} />}
-        {activeTab === 'expenses' && <ExpensesPage />}
-        {activeTab === 'income' && <IncomePage />}
-        {activeTab === 'cooperators' && (
-          <CooperatorsPage
+        {activeTab === 'dashboard' && (
+          <Dashboard
             onNavigateToActivities={handleNavigateToActivities}
-            onNavigateToReports={handleNavigateToReports}
+            onNavigateToActivity={handleNavigateToActivity}
           />
         )}
-        {activeTab === 'participants' && <ParticipantsPage />}
-        {activeTab === 'categories' && <CategoriesPage />}
+        {activeTab === 'activities' && <ActivityList initialCooperatorFilter={cooperatorFilter} />}
         {activeTab === 'reports' && <ReportsView />}
         {activeTab === 'settings' && <SettingsView />}
       </main>

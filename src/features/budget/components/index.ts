@@ -1,13 +1,8 @@
 export { default as Dashboard } from './Dashboard';
 export { default as ActivityList } from './ActivityList';
-export { default as ActivityDetail } from './ActivityDetail';
+export { default as ActivityDetailPage } from './ActivityDetailPage';
 export { default as ActivityForm } from './ActivityForm';
 export { default as ExpenseForm } from './ExpenseForm';
 export { default as IncomeForm } from './IncomeForm';
 export { default as ReportsView } from './ReportsView';
 export { default as SettingsView } from './SettingsView';
-export { default as ExpensesPage } from './ExpensesPage';
-export { default as IncomePage } from './IncomePage';
-export { default as CooperatorsPage } from './CooperatorsPage';
-export { default as ParticipantsPage } from './ParticipantsPage';
-export { default as CategoriesPage } from './CategoriesPage';
