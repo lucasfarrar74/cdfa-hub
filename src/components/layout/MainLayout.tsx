@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { MobileNav } from './MobileNav';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { useSidebarState } from '../../hooks/useSidebarState';
 import { cn } from '../../lib/utils';
 
@@ -27,7 +28,9 @@ export function MainLayout() {
         )}
       >
         <div className="p-4 lg:p-6">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
       <MobileNav />
