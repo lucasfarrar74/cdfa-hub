@@ -134,7 +134,7 @@ export default function ActivityList() {
       {error && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
           <p className="text-amber-800 dark:text-amber-200 text-sm">
-            Budget Tracker backend is not connected. Start the Flask server to sync activity data.
+            {error}
           </p>
         </div>
       )}
@@ -153,9 +153,11 @@ export default function ActivityList() {
       {!isLoading && filteredActivities.length === 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center">
           <p className="text-gray-500 dark:text-gray-400">No activities found.</p>
-          {error && (
-            <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">Activity data will appear here when the Flask backend is running.</p>
-          )}
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
+            {searchTerm || statusFilter || cooperatorFilter
+              ? 'Try adjusting your filters.'
+              : 'Create an activity to get started.'}
+          </p>
         </div>
       )}
 

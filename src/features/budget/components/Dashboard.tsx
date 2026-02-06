@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useBudget } from '../context/BudgetContext';
 
 function formatCurrency(amount: number): string {
@@ -60,47 +59,9 @@ function BudgetStatusBadge({ status }: { status: 'under' | 'near' | 'over' }) {
 export default function Dashboard() {
   const {
     dashboardSummary,
-    isLoading,
-    error,
-    loadDashboard,
-    loadActivities,
     activities,
+    loadSampleData,
   } = useBudget();
-
-  const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
-
-  useEffect(() => {
-    // Set a timeout to show empty state if backend doesn't respond
-    const timeout = setTimeout(() => {
-      setHasAttemptedLoad(true);
-    }, 1000); // 1 second timeout
-
-    const load = async () => {
-      try {
-        await Promise.all([loadDashboard(), loadActivities()]);
-      } catch {
-        // Ignore errors - we'll show empty state
-      } finally {
-        clearTimeout(timeout);
-        setHasAttemptedLoad(true);
-      }
-    };
-    load();
-
-    return () => clearTimeout(timeout);
-  }, [loadDashboard, loadActivities]);
-
-  // Show loading only on first load, not indefinitely
-  if (isLoading && !hasAttemptedLoad) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-500 dark:text-gray-400 text-sm">Loading budget data...</p>
-        </div>
-      </div>
-    );
-  }
 
   const summary = dashboardSummary;
 
@@ -111,15 +72,6 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Budget Dashboard</h1>
         <p className="text-gray-600 dark:text-gray-400 mt-1">Track expenses and budget utilization</p>
       </div>
-
-      {/* Backend Connection Notice */}
-      {error && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-          <p className="text-amber-800 dark:text-amber-200 text-sm">
-            Budget Tracker backend is not connected. Start the Flask server to sync budget data.
-          </p>
-        </div>
-      )}
 
       {/* Summary Stats */}
       {summary && (
@@ -160,7 +112,12 @@ export default function Dashboard() {
         {activities.length === 0 ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400">
             <p>No budget activities yet.</p>
-            <p className="text-sm mt-2">Budget tracking data will appear here when the Flask backend is running.</p>
+            <button
+              onClick={loadSampleData}
+              className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Load sample data to explore
+            </button>
           </div>
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
