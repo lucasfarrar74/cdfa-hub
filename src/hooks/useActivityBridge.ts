@@ -33,8 +33,11 @@ export function useActivityBridge(): UseActivityBridgeResult {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data;
 
+      console.log('[useActivityBridge] Received message:', data?.type);
+
       // Listen for ready signal from Project Manager
       if (data?.type === 'CDFA_ACTIVITY_BRIDGE_READY') {
+        console.log('[useActivityBridge] Project Manager bridge is ready');
         setIsReady(true);
         return;
       }
@@ -69,13 +72,15 @@ export function useActivityBridge(): UseActivityBridgeResult {
   }, []);
 
   const createActivity = useCallback(async (activity: ActivityLink): Promise<{ activityId: string } | null> => {
+    console.log('[useActivityBridge] createActivity called, isReady:', isReady, 'hasIframe:', !!iframeRef.current?.contentWindow);
+
     if (!iframeRef.current?.contentWindow) {
-      // Project Manager iframe not loaded - silently skip
+      console.log('[useActivityBridge] No iframe contentWindow - skipping');
       return null;
     }
 
     if (!isReady) {
-      // Not ready - silently skip
+      console.log('[useActivityBridge] Not ready - skipping');
       return null;
     }
 
@@ -106,9 +111,13 @@ export function useActivityBridge(): UseActivityBridgeResult {
         },
       };
 
+      console.log('[useActivityBridge] Sending CREATE_ACTIVITY message:', message);
+
       try {
         iframeRef.current!.contentWindow!.postMessage(message, '*');
-      } catch {
+        console.log('[useActivityBridge] Message sent successfully');
+      } catch (err) {
+        console.error('[useActivityBridge] Failed to send message:', err);
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
           timeoutRef.current = null;
