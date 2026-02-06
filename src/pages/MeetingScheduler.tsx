@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ScheduleProvider, useSchedule } from '../features/scheduler/context/ScheduleContext';
+import { ThemeProvider } from '../features/scheduler/context/ThemeContext';
 import {
   EventConfigPanel,
   ParticipantsPanel,
@@ -151,8 +152,10 @@ function SchedulerContent() {
 
 export function MeetingScheduler() {
   return (
-    <ScheduleProvider>
-      <SchedulerContent />
-    </ScheduleProvider>
+    <ThemeProvider>
+      <ScheduleProvider>
+        <SchedulerContent />
+      </ScheduleProvider>
+    </ThemeProvider>
   );
 }
