@@ -11,6 +11,8 @@ export interface ActivityLink {
   startDate: string;
   endDate: string;
   location?: string;
+  // Project Manager links
+  projectManagerActivityId?: string;
   // Meeting Scheduler links
   meetingSchedulerProjectId?: string;
   meetingSchedulerShareId?: string;

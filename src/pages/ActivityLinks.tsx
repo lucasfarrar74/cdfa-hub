@@ -41,6 +41,7 @@ function saveActivityLinks(links: ActivityLink[]): void {
 function ActivityLinksContent() {
   const [activityLinks, setActivityLinks] = useState<ActivityLink[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [creatingProjectForId, setCreatingProjectForId] = useState<string | null>(null);
   const [creatingScheduleForId, setCreatingScheduleForId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,18 +73,42 @@ function ActivityLinksContent() {
 
     setActivityLinks(prev => [...prev, newLink]);
     setIsModalOpen(false);
+  }, []);
 
-    // Also create the activity in Project Manager
+  const handleCreateProjectManagerActivity = useCallback(async (activity: ActivityLink) => {
+    setCreatingProjectForId(activity.id);
+    setError(null);
+
     try {
-      createActivity('outbound_trade_mission', {
-        name: formData.name,
-        startDate: formData.startDate,
-        endDate: formData.endDate,
-        location: formData.location,
+      // Create the activity in Project Manager
+      const newActivity = createActivity('outbound_trade_mission', {
+        name: activity.name,
+        startDate: activity.startDate,
+        endDate: activity.endDate,
+        location: activity.location,
         status: 'planning',
       });
+
+      if (newActivity) {
+        // Update the activity link with the Project Manager activity ID
+        setActivityLinks(prev => {
+          const updated = prev.map(a =>
+            a.id === activity.id
+              ? {
+                  ...a,
+                  projectManagerActivityId: newActivity.id,
+                  updatedAt: new Date().toISOString(),
+                }
+              : a
+          );
+          saveActivityLinks(updated);
+          return updated;
+        });
+      }
     } catch (err) {
-      console.error('Failed to create activity in Project Manager:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create Project Manager activity');
+    } finally {
+      setCreatingProjectForId(null);
     }
   }, [createActivity]);
 
@@ -154,7 +179,7 @@ function ActivityLinksContent() {
             Activity Links
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Link activities across Meeting Scheduler and Budget Tracker
+            Link activities across Project Manager, Meeting Scheduler, and Budget Tracker
           </p>
         </div>
         <button
@@ -186,7 +211,7 @@ function ActivityLinksContent() {
             No activities yet
           </h3>
           <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-sm mx-auto">
-            Add an activity to start linking it with Meeting Scheduler and Budget Tracker
+            Add an activity to start linking it with Project Manager, Meeting Scheduler, and Budget Tracker
           </p>
           <button
             onClick={() => setIsModalOpen(true)}
@@ -202,8 +227,10 @@ function ActivityLinksContent() {
             <ActivityLinkCard
               key={activity.id}
               activity={activity}
+              onCreateProjectManagerActivity={handleCreateProjectManagerActivity}
               onCreateMeetingSchedule={handleCreateMeetingSchedule}
               onDelete={handleDeleteActivity}
+              isCreatingProject={creatingProjectForId === activity.id}
               isCreatingSchedule={creatingScheduleForId === activity.id}
             />
           ))}
