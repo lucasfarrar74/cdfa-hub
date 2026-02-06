@@ -85,7 +85,7 @@ export function getBudgetTrackerCreateUrl(activity: ActivityLink): string {
   // Use localhost for development
   const baseUrl = import.meta.env.DEV
     ? 'http://localhost:5000'
-    : 'https://budget-tracker.example.com'; // TODO: Update with production URL
+    : 'https://budget-tracker-three-kappa.vercel.app'; // TODO: Update with production URL
 
   return `${baseUrl}/activities/create?${params.toString()}`;
 }
@@ -96,7 +96,7 @@ export function getBudgetTrackerCreateUrl(activity: ActivityLink): string {
 export function getBudgetTrackerViewUrl(budgetActivityId: string): string {
   const baseUrl = import.meta.env.DEV
     ? 'http://localhost:5000'
-    : 'https://budget-tracker.example.com';
+    : 'https://budget-tracker-three-kappa.vercel.app';
 
   return `${baseUrl}/activities/${budgetActivityId}`;
 }
