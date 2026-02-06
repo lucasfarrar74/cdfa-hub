@@ -104,16 +104,12 @@ export function getBudgetTrackerViewUrl(budgetActivityId: string): string {
 }
 
 /**
- * Get the Meeting Scheduler URL for a project
+ * Get the Meeting Scheduler URL for a project (internal route)
  */
 export function getMeetingSchedulerUrl(shareId?: string): string {
-  const baseUrl = import.meta.env.DEV
-    ? 'http://localhost:5176'
-    : 'https://meeting-scheduler-five.vercel.app';
-
   if (shareId) {
-    return `${baseUrl}?share=${shareId}`;
+    return `/meeting-scheduler?share=${shareId}`;
   }
 
-  return baseUrl;
+  return '/meeting-scheduler';
 }
