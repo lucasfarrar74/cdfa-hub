@@ -42,6 +42,7 @@ const DEFAULT_USER: AuthUser = {
 };
 
 // Set to true to enable Firebase auth, false for solo development
+// When ready for team use, change this to true
 const ENABLE_AUTH = false;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
