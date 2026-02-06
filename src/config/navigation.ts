@@ -1,9 +1,8 @@
 import type { NavigationItem, QuickAction, WidgetConfig } from '../types';
 
-// Use localhost URLs for development
+// Legacy URLs for iframe fallbacks (no longer used for Project Manager or Meeting Scheduler)
 const isDev = import.meta.env.DEV;
 const projectManagerUrl = isDev ? 'http://localhost:5179' : 'https://cdfa-project-manager.vercel.app';
-const meetingSchedulerUrl = isDev ? 'http://localhost:5176' : 'https://meeting-scheduler-five.vercel.app';
 
 export const navigationItems: NavigationItem[] = [
   {
@@ -100,8 +99,9 @@ export const quickActions: QuickAction[] = [
     id: 'schedule-meetings',
     label: 'Schedule Meetings',
     description: 'Create B2B meeting schedules',
-    url: meetingSchedulerUrl,
+    url: '/meeting-scheduler',
     icon: 'user-group',
+    internal: true,
   },
   {
     id: 'import-data',
@@ -109,6 +109,7 @@ export const quickActions: QuickAction[] = [
     description: 'Upload Excel file with participant data',
     url: '/data-import',
     icon: 'arrow-up-tray',
+    internal: true,
   },
   {
     id: 'link-activities',
@@ -116,6 +117,7 @@ export const quickActions: QuickAction[] = [
     description: 'Connect activities across tools',
     url: '/activity-links',
     icon: 'link',
+    internal: true,
   },
 ];
 
