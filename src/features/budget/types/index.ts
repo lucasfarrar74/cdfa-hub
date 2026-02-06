@@ -158,6 +158,19 @@ export interface CreateIncomeInput {
   notes?: string;
 }
 
+export interface UpdateExpenseInput extends Partial<CreateExpenseInput> {}
+
+export interface UpdateIncomeInput extends Partial<CreateIncomeInput> {}
+
+export interface ExpenseTemplate {
+  id: number;
+  name: string;
+  category_id: number;
+  description: string;
+  default_amount: number;
+  notes: string;
+}
+
 export type BudgetStatus = 'under' | 'near' | 'over';
 export type ActivityStatus = 'planning' | 'active' | 'completed';
 export type ExpenseStatus = 'projected' | 'actual' | 'partial';

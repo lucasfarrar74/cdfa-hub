@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useBudget } from '../context/BudgetContext';
-import { LinkAccountForm } from './LinkAccountForm';
+import ActivityDetail from './ActivityDetail';
+import ActivityForm from './ActivityForm';
 import type { ActivityStatus, BudgetStatus } from '../types';
 
 function formatCurrency(amount: number): string {
@@ -55,21 +56,22 @@ function BudgetStatusBadge({ status }: { status: BudgetStatus }) {
   );
 }
 
-export default function ActivityList() {
-  const { activities, isLoading, isLinked, error, loadActivities, cooperators } = useBudget();
+export default function ActivityList({ initialCooperatorFilter }: { initialCooperatorFilter?: number }) {
+  const { activities, isLoading, error, loadActivities, cooperators, selectedActivityId, selectActivity } = useBudget();
   const [statusFilter, setStatusFilter] = useState<ActivityStatus | ''>('');
-  const [cooperatorFilter, setCooperatorFilter] = useState<number | ''>('');
+  const [cooperatorFilter, setCooperatorFilter] = useState<number | ''>(initialCooperatorFilter || '');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showNewForm, setShowNewForm] = useState(false);
 
   useEffect(() => {
-    if (isLinked) {
-      loadActivities();
-    }
-  }, [isLinked, loadActivities]);
+    loadActivities();
+  }, [loadActivities]);
 
-  if (!isLinked) {
-    return <LinkAccountForm />;
-  }
+  useEffect(() => {
+    if (initialCooperatorFilter) {
+      setCooperatorFilter(initialCooperatorFilter);
+    }
+  }, [initialCooperatorFilter]);
 
   const filteredActivities = activities.filter(activity => {
     if (statusFilter && activity.status !== statusFilter) return false;
@@ -86,137 +88,168 @@ export default function ActivityList() {
   });
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Activities</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">Manage activity budgets and expenses</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex flex-wrap gap-4">
-          <div className="flex-1 min-w-[200px]">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Search activities..."
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+    <div className="flex h-full gap-0" style={{ minHeight: 0 }}>
+      {/* Left: Activity List */}
+      <div className={`flex-1 min-w-0 space-y-4 overflow-y-auto ${selectedActivityId != null ? 'hidden lg:block lg:max-w-[50%]' : ''}`}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Activities</h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1">Manage activity budgets and expenses</p>
           </div>
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as ActivityStatus | '')}
-            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          <button
+            onClick={() => setShowNewForm(true)}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
           >
-            <option value="">All Statuses</option>
-            <option value="planning">Planning</option>
-            <option value="active">Active</option>
-            <option value="completed">Completed</option>
-          </select>
-          <select
-            value={cooperatorFilter}
-            onChange={e => setCooperatorFilter(e.target.value ? Number(e.target.value) : '')}
-            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">All Cooperators</option>
-            {cooperators.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+            + New Activity
+          </button>
         </div>
-      </div>
 
-      {/* Error State */}
-      {error && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-          <p className="text-amber-800 dark:text-amber-200 text-sm">
-            {error}
-          </p>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {isLoading && activities.length === 0 && (
-        <div className="flex items-center justify-center h-64">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-500 dark:text-gray-400 text-sm">Loading activities...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Activity List */}
-      {!isLoading && filteredActivities.length === 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center">
-          <p className="text-gray-500 dark:text-gray-400">No activities found.</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
-            {searchTerm || statusFilter || cooperatorFilter
-              ? 'Try adjusting your filters.'
-              : 'Create an activity to get started.'}
-          </p>
-        </div>
-      )}
-
-      {filteredActivities.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm dark:shadow-gray-900/50 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Activity</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Cooperator</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Dates</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Budget</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Committed</th>
-                <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Health</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredActivities.map(activity => (
-                <tr key={activity.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-gray-100">{activity.name}</p>
-                      {activity.location && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">{activity.location}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{activity.cooperator_name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    {formatDate(activity.start_date)}
-                    {activity.end_date && activity.end_date !== activity.start_date && (
-                      <> - {formatDate(activity.end_date)}</>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={activity.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-gray-100">
-                    {formatCurrency(activity.budget)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <p className="font-medium text-gray-900 dark:text-gray-100">
-                      {formatCurrency(activity.net_committed)}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {activity.budget > 0
-                        ? `${Math.round((activity.net_committed / activity.budget) * 100)}%`
-                        : '0%'}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <BudgetStatusBadge status={activity.budget_status} />
-                  </td>
-                </tr>
+        {/* Filters */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[200px]">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Search activities..."
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as ActivityStatus | '')}
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Statuses</option>
+              <option value="planning">Planning</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+            </select>
+            <select
+              value={cooperatorFilter}
+              onChange={e => setCooperatorFilter(e.target.value ? Number(e.target.value) : '')}
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Cooperators</option>
+              {cooperators.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+          </div>
         </div>
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+            <p className="text-amber-800 dark:text-amber-200 text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {isLoading && activities.length === 0 && (
+          <div className="flex items-center justify-center h-64">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-gray-500 dark:text-gray-400 text-sm">Loading activities...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!isLoading && filteredActivities.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center">
+            <p className="text-gray-500 dark:text-gray-400">No activities found.</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
+              {searchTerm || statusFilter || cooperatorFilter
+                ? 'Try adjusting your filters.'
+                : 'Create an activity to get started.'}
+            </p>
+          </div>
+        )}
+
+        {/* Activity Table */}
+        {filteredActivities.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm dark:shadow-gray-900/50 overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Activity</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Cooperator</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300 hidden xl:table-cell">Dates</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Budget</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Committed</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Health</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {filteredActivities.map(activity => (
+                  <tr
+                    key={activity.id}
+                    onClick={() => selectActivity(activity.id)}
+                    className={`cursor-pointer transition-colors ${
+                      selectedActivityId === activity.id
+                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">{activity.name}</p>
+                        {activity.location && (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">{activity.location}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{activity.cooperator_name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden xl:table-cell">
+                      {formatDate(activity.start_date)}
+                      {activity.end_date && activity.end_date !== activity.start_date && (
+                        <> - {formatDate(activity.end_date)}</>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={activity.status} />
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-gray-100">
+                      {formatCurrency(activity.budget)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <p className="font-medium text-gray-900 dark:text-gray-100">
+                        {formatCurrency(activity.net_committed)}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {activity.budget > 0
+                          ? `${Math.round((activity.net_committed / activity.budget) * 100)}%`
+                          : '0%'}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <BudgetStatusBadge status={activity.budget_status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Right: Activity Detail Panel */}
+      {selectedActivityId != null && (
+        <div className="w-full lg:w-[50%] lg:min-w-[400px] lg:max-w-[600px] border-l-0 lg:border-l border-gray-200 dark:border-gray-700">
+          <ActivityDetail
+            activityId={selectedActivityId}
+            onClose={() => selectActivity(null)}
+          />
+        </div>
+      )}
+
+      {/* New Activity Form */}
+      {showNewForm && (
+        <ActivityForm onClose={() => setShowNewForm(false)} />
       )}
     </div>
   );

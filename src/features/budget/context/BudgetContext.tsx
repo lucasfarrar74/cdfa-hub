@@ -18,6 +18,8 @@ import type {
   CreateActivityInput,
   UpdateActivityInput,
   CreateExpenseInput,
+  CreateIncomeInput,
+  ExpenseTemplate,
 } from '../types';
 import {
   sampleCooperators,
@@ -42,6 +44,8 @@ interface BudgetState {
   dashboardSummary: DashboardSummary | null;
   allExpenses: Record<number, Expense[]>;
   allIncome: Record<number, Income[]>;
+  templates: ExpenseTemplate[];
+  selectedActivityId: number | null;
   nextId: number;
   isLoading: boolean;
   isLinked: boolean;
@@ -65,7 +69,23 @@ type BudgetAction =
   | { type: 'UPDATE_ACTIVITY'; payload: { id: number; updates: Partial<ActivitySummary> } }
   | { type: 'ADD_EXPENSE'; payload: { activityId: number; expense: Expense } }
   | { type: 'DELETE_ACTIVITY'; payload: number }
-  | { type: 'LOAD_STATE'; payload: PersistedState };
+  | { type: 'LOAD_STATE'; payload: PersistedState }
+  | { type: 'SELECT_ACTIVITY'; payload: number | null }
+  | { type: 'DELETE_EXPENSE'; payload: { activityId: number; expenseId: number } }
+  | { type: 'UPDATE_EXPENSE'; payload: { activityId: number; expenseId: number; updates: Partial<Expense> } }
+  | { type: 'ADD_INCOME'; payload: { activityId: number; income: Income } }
+  | { type: 'UPDATE_INCOME'; payload: { activityId: number; incomeId: number; updates: Partial<Income> } }
+  | { type: 'DELETE_INCOME'; payload: { activityId: number; incomeId: number } }
+  | { type: 'ADD_COOPERATOR'; payload: Cooperator }
+  | { type: 'UPDATE_COOPERATOR'; payload: { id: number; updates: Partial<Cooperator> } }
+  | { type: 'DELETE_COOPERATOR'; payload: number }
+  | { type: 'ADD_CATEGORY'; payload: ExpenseCategory }
+  | { type: 'UPDATE_CATEGORY'; payload: { id: number; updates: Partial<ExpenseCategory> } }
+  | { type: 'DELETE_CATEGORY'; payload: number }
+  | { type: 'SET_TEMPLATES'; payload: ExpenseTemplate[] }
+  | { type: 'ADD_TEMPLATE'; payload: ExpenseTemplate }
+  | { type: 'UPDATE_TEMPLATE'; payload: { id: number; updates: Partial<ExpenseTemplate> } }
+  | { type: 'DELETE_TEMPLATE'; payload: number };
 
 interface PersistedState {
   activities: ActivitySummary[];
@@ -73,6 +93,7 @@ interface PersistedState {
   allIncome: Record<number, Income[]>;
   cooperators: Cooperator[];
   categories: ExpenseCategory[];
+  templates?: ExpenseTemplate[];
   nextId: number;
 }
 
@@ -86,6 +107,8 @@ const initialState: BudgetState = {
   dashboardSummary: null,
   allExpenses: {},
   allIncome: {},
+  templates: [],
+  selectedActivityId: null,
   nextId: INITIAL_NEXT_ID,
   isLoading: false,
   isLinked: true,
@@ -178,6 +201,26 @@ function computeDashboardSummary(activities: ActivitySummary[]): DashboardSummar
   };
 }
 
+function recomputeActivityFromState(
+  state: BudgetState,
+  activityId: number,
+  expensesOverride?: Expense[],
+  incomeOverride?: Income[]
+): Partial<ActivitySummary> {
+  const activity = state.activities.find(a => a.id === activityId);
+  if (!activity) return {};
+  const expenses = expensesOverride ?? state.allExpenses[activityId] ?? [];
+  const income = incomeOverride ?? state.allIncome[activityId] ?? [];
+  const financials = computeFinancials(activity, expenses, income);
+  return {
+    total_actual: financials.total_actual,
+    total_committed: financials.total_committed,
+    net_committed: financials.net_committed,
+    available_budget: financials.available_budget,
+    budget_status: financials.budget_status,
+  };
+}
+
 // --- Reducer ---
 
 function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
@@ -202,6 +245,9 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
       return { ...state, categories: action.payload };
     case 'SET_DASHBOARD_SUMMARY':
       return { ...state, dashboardSummary: action.payload };
+
+    case 'SELECT_ACTIVITY':
+      return { ...state, selectedActivityId: action.payload };
 
     case 'ADD_ACTIVITY':
       return {
@@ -238,6 +284,74 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
       };
     }
 
+    case 'DELETE_EXPENSE': {
+      const { activityId, expenseId } = action.payload;
+      const updatedExpenses = (state.allExpenses[activityId] || []).filter(e => e.id !== expenseId);
+      return {
+        ...state,
+        allExpenses: { ...state.allExpenses, [activityId]: updatedExpenses },
+        expenses: state.currentActivity?.id === activityId
+          ? updatedExpenses
+          : state.expenses,
+      };
+    }
+
+    case 'UPDATE_EXPENSE': {
+      const { activityId, expenseId, updates } = action.payload;
+      const updatedExpenses = (state.allExpenses[activityId] || []).map(e =>
+        e.id === expenseId ? { ...e, ...updates, updated_at: new Date().toISOString() } : e
+      );
+      return {
+        ...state,
+        allExpenses: { ...state.allExpenses, [activityId]: updatedExpenses },
+        expenses: state.currentActivity?.id === activityId
+          ? updatedExpenses
+          : state.expenses,
+      };
+    }
+
+    case 'ADD_INCOME': {
+      const { activityId, income: newIncome } = action.payload;
+      const updatedIncome = [
+        ...(state.allIncome[activityId] || []),
+        newIncome,
+      ];
+      return {
+        ...state,
+        allIncome: { ...state.allIncome, [activityId]: updatedIncome },
+        income: state.currentActivity?.id === activityId
+          ? updatedIncome
+          : state.income,
+        nextId: state.nextId + 1,
+      };
+    }
+
+    case 'UPDATE_INCOME': {
+      const { activityId, incomeId, updates } = action.payload;
+      const updatedIncome = (state.allIncome[activityId] || []).map(i =>
+        i.id === incomeId ? { ...i, ...updates, updated_at: new Date().toISOString() } : i
+      );
+      return {
+        ...state,
+        allIncome: { ...state.allIncome, [activityId]: updatedIncome },
+        income: state.currentActivity?.id === activityId
+          ? updatedIncome
+          : state.income,
+      };
+    }
+
+    case 'DELETE_INCOME': {
+      const { activityId, incomeId } = action.payload;
+      const updatedIncome = (state.allIncome[activityId] || []).filter(i => i.id !== incomeId);
+      return {
+        ...state,
+        allIncome: { ...state.allIncome, [activityId]: updatedIncome },
+        income: state.currentActivity?.id === activityId
+          ? updatedIncome
+          : state.income,
+      };
+    }
+
     case 'DELETE_ACTIVITY': {
       const id = action.payload;
       const { [id]: _e, ...restExpenses } = state.allExpenses;
@@ -247,8 +361,81 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         activities: state.activities.filter(a => a.id !== id),
         allExpenses: restExpenses,
         allIncome: restIncome,
+        selectedActivityId: state.selectedActivityId === id ? null : state.selectedActivityId,
       };
     }
+
+    case 'ADD_COOPERATOR':
+      return {
+        ...state,
+        cooperators: [...state.cooperators, action.payload],
+        nextId: state.nextId + 1,
+      };
+
+    case 'UPDATE_COOPERATOR': {
+      const { id, updates } = action.payload;
+      return {
+        ...state,
+        cooperators: state.cooperators.map(c =>
+          c.id === id ? { ...c, ...updates } : c
+        ),
+      };
+    }
+
+    case 'DELETE_COOPERATOR':
+      return {
+        ...state,
+        cooperators: state.cooperators.filter(c => c.id !== action.payload),
+      };
+
+    case 'ADD_CATEGORY':
+      return {
+        ...state,
+        categories: [...state.categories, action.payload],
+        nextId: state.nextId + 1,
+      };
+
+    case 'UPDATE_CATEGORY': {
+      const { id, updates } = action.payload;
+      return {
+        ...state,
+        categories: state.categories.map(c =>
+          c.id === id ? { ...c, ...updates } : c
+        ),
+      };
+    }
+
+    case 'DELETE_CATEGORY':
+      return {
+        ...state,
+        categories: state.categories.filter(c => c.id !== action.payload),
+      };
+
+    case 'SET_TEMPLATES':
+      return { ...state, templates: action.payload };
+
+    case 'ADD_TEMPLATE':
+      return {
+        ...state,
+        templates: [...state.templates, action.payload],
+        nextId: state.nextId + 1,
+      };
+
+    case 'UPDATE_TEMPLATE': {
+      const { id, updates } = action.payload;
+      return {
+        ...state,
+        templates: state.templates.map(t =>
+          t.id === id ? { ...t, ...updates } : t
+        ),
+      };
+    }
+
+    case 'DELETE_TEMPLATE':
+      return {
+        ...state,
+        templates: state.templates.filter(t => t.id !== action.payload),
+      };
 
     case 'LOAD_STATE':
       return {
@@ -258,6 +445,7 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         allIncome: action.payload.allIncome,
         cooperators: action.payload.cooperators,
         categories: action.payload.categories,
+        templates: action.payload.templates ?? [],
         nextId: action.payload.nextId,
       };
 
@@ -277,12 +465,32 @@ interface BudgetContextType extends BudgetState {
   loadDashboard: () => Promise<void>;
   createActivity: (data: CreateActivityInput) => Promise<Activity | null>;
   updateActivity: (activityId: number, data: UpdateActivityInput) => Promise<Activity | null>;
+  deleteActivity: (id: number) => void;
   createExpense: (activityId: number, data: CreateExpenseInput) => Promise<Expense | null>;
+  updateExpense: (activityId: number, expenseId: number, updates: Partial<Expense>) => void;
+  deleteExpense: (activityId: number, expenseId: number) => void;
+  duplicateExpense: (activityId: number, expenseId: number) => Expense | null;
+  convertExpenseToActual: (activityId: number, expenseId: number) => void;
+  createIncome: (activityId: number, data: CreateIncomeInput) => Income | null;
+  updateIncome: (activityId: number, incomeId: number, updates: Partial<Income>) => void;
+  deleteIncome: (activityId: number, incomeId: number) => void;
+  markIncomeReceived: (activityId: number, incomeId: number) => void;
+  selectActivity: (id: number | null) => void;
+  createCooperator: (data: Partial<Cooperator>) => Cooperator;
+  updateCooperator: (id: number, updates: Partial<Cooperator>) => void;
+  deleteCooperator: (id: number) => boolean;
+  createCategory: (data: Partial<ExpenseCategory>) => ExpenseCategory;
+  updateCategory: (id: number, updates: Partial<ExpenseCategory>) => void;
+  deleteCategory: (id: number) => boolean;
+  createTemplate: (data: Omit<ExpenseTemplate, 'id'>) => ExpenseTemplate;
+  updateTemplate: (id: number, updates: Partial<ExpenseTemplate>) => void;
+  deleteTemplate: (id: number) => void;
   linkAccount: (username: string, password: string) => Promise<boolean>;
   clearError: () => void;
   loadSampleData: () => void;
   exportToJSON: () => string;
   importFromJSON: (json: string) => boolean;
+  computeActivityFinancials: (activityId: number) => ActivityFinancials | null;
 }
 
 const BudgetContext = createContext<BudgetContextType | null>(null);
@@ -316,7 +524,6 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
 
   // Persist to localStorage on state change
   useEffect(() => {
-    // Only persist if we have data loaded (avoid writing empty state on first render)
     if (state.activities.length === 0 && state.cooperators.length === 0) return;
 
     const persisted: PersistedState = {
@@ -325,10 +532,11 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: state.allIncome,
       cooperators: state.cooperators,
       categories: state.categories,
+      templates: state.templates,
       nextId: state.nextId,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.templates, state.nextId]);
 
   // Auto-compute dashboard summary when activities change
   useEffect(() => {
@@ -338,11 +546,26 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     }
   }, [state.activities]);
 
+  // Helper to recompute and dispatch activity financials
+  const recomputeAndUpdate = useCallback((
+    activityId: number,
+    expensesOverride?: Expense[],
+    incomeOverride?: Income[]
+  ) => {
+    const updates = recomputeActivityFromState(
+      { ...state } as BudgetState,
+      activityId,
+      expensesOverride,
+      incomeOverride
+    );
+    if (Object.keys(updates).length > 0) {
+      dispatch({ type: 'UPDATE_ACTIVITY', payload: { id: activityId, updates } });
+    }
+  }, [state]);
+
   // --- Action functions ---
 
-  const loadActivities = useCallback(async () => {
-    // Data already in state from localStorage / sample data
-  }, []);
+  const loadActivities = useCallback(async () => {}, []);
 
   const loadActivity = useCallback(async (activityId: number) => {
     const summary = state.activities.find(a => a.id === activityId);
@@ -400,8 +623,10 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_INCOME', payload: income });
   }, [state.allIncome]);
 
-  const loadDashboard = useCallback(async () => {
-    // Dashboard summary auto-computed via useEffect
+  const loadDashboard = useCallback(async () => {}, []);
+
+  const selectActivity = useCallback((id: number | null) => {
+    dispatch({ type: 'SELECT_ACTIVITY', payload: id });
   }, []);
 
   const createActivity = useCallback(async (data: CreateActivityInput): Promise<Activity | null> => {
@@ -477,12 +702,26 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    // Return full Activity object
     const updated = { ...existing, ...data, cooperator_name: cooperatorName };
     const cooperator = state.cooperators.find(c => c.id === updated.cooperator_id) || null;
     const expenses = state.allExpenses[activityId] || [];
     const income = state.allIncome[activityId] || [];
     const financials = computeFinancials(updated, expenses, income);
+
+    // Also recompute budget status after update
+    dispatch({
+      type: 'UPDATE_ACTIVITY',
+      payload: {
+        id: activityId,
+        updates: {
+          total_actual: financials.total_actual,
+          total_committed: financials.total_committed,
+          net_committed: financials.net_committed,
+          available_budget: financials.available_budget,
+          budget_status: financials.budget_status,
+        },
+      },
+    });
 
     return {
       ...updated,
@@ -492,6 +731,10 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       updated_at: new Date().toISOString(),
     };
   }, [state.activities, state.cooperators, state.allExpenses, state.allIncome]);
+
+  const deleteActivity = useCallback((id: number) => {
+    dispatch({ type: 'DELETE_ACTIVITY', payload: id });
+  }, []);
 
   const createExpense = useCallback(async (
     activityId: number,
@@ -524,7 +767,6 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
 
     dispatch({ type: 'ADD_EXPENSE', payload: { activityId, expense } });
 
-    // Recompute activity financials
     const activity = state.activities.find(a => a.id === activityId);
     if (activity) {
       const allExp = [...(state.allExpenses[activityId] || []), expense];
@@ -548,6 +790,298 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
 
     return expense;
   }, [state.nextId, state.categories, state.activities, state.allExpenses, state.allIncome]);
+
+  const updateExpense = useCallback((
+    activityId: number,
+    expenseId: number,
+    updates: Partial<Expense>
+  ) => {
+    dispatch({ type: 'UPDATE_EXPENSE', payload: { activityId, expenseId, updates } });
+
+    // Recompute financials
+    const activity = state.activities.find(a => a.id === activityId);
+    if (activity) {
+      const updatedExpenses = (state.allExpenses[activityId] || []).map(e =>
+        e.id === expenseId ? { ...e, ...updates } : e
+      );
+      const allInc = state.allIncome[activityId] || [];
+      const financials = computeFinancials(activity, updatedExpenses, allInc);
+      dispatch({
+        type: 'UPDATE_ACTIVITY',
+        payload: {
+          id: activityId,
+          updates: {
+            total_actual: financials.total_actual,
+            total_committed: financials.total_committed,
+            net_committed: financials.net_committed,
+            available_budget: financials.available_budget,
+            budget_status: financials.budget_status,
+          },
+        },
+      });
+    }
+  }, [state.activities, state.allExpenses, state.allIncome]);
+
+  const deleteExpense = useCallback((activityId: number, expenseId: number) => {
+    dispatch({ type: 'DELETE_EXPENSE', payload: { activityId, expenseId } });
+
+    const activity = state.activities.find(a => a.id === activityId);
+    if (activity) {
+      const updatedExpenses = (state.allExpenses[activityId] || []).filter(e => e.id !== expenseId);
+      const allInc = state.allIncome[activityId] || [];
+      const financials = computeFinancials(activity, updatedExpenses, allInc);
+      dispatch({
+        type: 'UPDATE_ACTIVITY',
+        payload: {
+          id: activityId,
+          updates: {
+            total_actual: financials.total_actual,
+            total_committed: financials.total_committed,
+            net_committed: financials.net_committed,
+            available_budget: financials.available_budget,
+            budget_status: financials.budget_status,
+          },
+        },
+      });
+    }
+  }, [state.activities, state.allExpenses, state.allIncome]);
+
+  const duplicateExpense = useCallback((activityId: number, expenseId: number): Expense | null => {
+    const original = (state.allExpenses[activityId] || []).find(e => e.id === expenseId);
+    if (!original) return null;
+
+    const now = new Date().toISOString();
+    const expense: Expense = {
+      ...original,
+      id: state.nextId,
+      actual_amount: null,
+      actual_date: null,
+      status: 'projected',
+      receipt_reference: null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    dispatch({ type: 'ADD_EXPENSE', payload: { activityId, expense } });
+    recomputeAndUpdate(activityId, [...(state.allExpenses[activityId] || []), expense]);
+
+    return expense;
+  }, [state.allExpenses, state.nextId, recomputeAndUpdate]);
+
+  const convertExpenseToActual = useCallback((activityId: number, expenseId: number) => {
+    const expense = (state.allExpenses[activityId] || []).find(e => e.id === expenseId);
+    if (!expense) return;
+
+    const updates: Partial<Expense> = {
+      actual_amount: expense.projected_amount,
+      actual_date: new Date().toISOString().split('T')[0],
+      status: 'actual',
+    };
+
+    updateExpense(activityId, expenseId, updates);
+  }, [state.allExpenses, updateExpense]);
+
+  const createIncome = useCallback((activityId: number, data: CreateIncomeInput): Income | null => {
+    const now = new Date().toISOString();
+
+    let status: 'projected' | 'actual' | 'partial' = 'projected';
+    if (data.actual_amount && data.projected_amount) status = 'partial';
+    else if (data.actual_amount) status = 'actual';
+
+    const income: Income = {
+      id: state.nextId,
+      activity_id: activityId,
+      description: data.description,
+      source: data.source ?? null,
+      projected_amount: data.projected_amount ?? null,
+      projected_date: data.projected_date ?? null,
+      actual_amount: data.actual_amount ?? null,
+      actual_date: data.actual_date ?? null,
+      status,
+      notes: data.notes ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    dispatch({ type: 'ADD_INCOME', payload: { activityId, income } });
+
+    // Recompute financials
+    const activity = state.activities.find(a => a.id === activityId);
+    if (activity) {
+      const allExp = state.allExpenses[activityId] || [];
+      const allInc = [...(state.allIncome[activityId] || []), income];
+      const financials = computeFinancials(activity, allExp, allInc);
+      dispatch({
+        type: 'UPDATE_ACTIVITY',
+        payload: {
+          id: activityId,
+          updates: {
+            total_actual: financials.total_actual,
+            total_committed: financials.total_committed,
+            net_committed: financials.net_committed,
+            available_budget: financials.available_budget,
+            budget_status: financials.budget_status,
+          },
+        },
+      });
+    }
+
+    return income;
+  }, [state.nextId, state.activities, state.allExpenses, state.allIncome]);
+
+  const updateIncome = useCallback((activityId: number, incomeId: number, updates: Partial<Income>) => {
+    dispatch({ type: 'UPDATE_INCOME', payload: { activityId, incomeId, updates } });
+
+    const activity = state.activities.find(a => a.id === activityId);
+    if (activity) {
+      const allExp = state.allExpenses[activityId] || [];
+      const updatedIncome = (state.allIncome[activityId] || []).map(i =>
+        i.id === incomeId ? { ...i, ...updates } : i
+      );
+      const financials = computeFinancials(activity, allExp, updatedIncome);
+      dispatch({
+        type: 'UPDATE_ACTIVITY',
+        payload: {
+          id: activityId,
+          updates: {
+            total_actual: financials.total_actual,
+            total_committed: financials.total_committed,
+            net_committed: financials.net_committed,
+            available_budget: financials.available_budget,
+            budget_status: financials.budget_status,
+          },
+        },
+      });
+    }
+  }, [state.activities, state.allExpenses, state.allIncome]);
+
+  const deleteIncome = useCallback((activityId: number, incomeId: number) => {
+    dispatch({ type: 'DELETE_INCOME', payload: { activityId, incomeId } });
+
+    const activity = state.activities.find(a => a.id === activityId);
+    if (activity) {
+      const allExp = state.allExpenses[activityId] || [];
+      const updatedIncome = (state.allIncome[activityId] || []).filter(i => i.id !== incomeId);
+      const financials = computeFinancials(activity, allExp, updatedIncome);
+      dispatch({
+        type: 'UPDATE_ACTIVITY',
+        payload: {
+          id: activityId,
+          updates: {
+            total_actual: financials.total_actual,
+            total_committed: financials.total_committed,
+            net_committed: financials.net_committed,
+            available_budget: financials.available_budget,
+            budget_status: financials.budget_status,
+          },
+        },
+      });
+    }
+  }, [state.activities, state.allExpenses, state.allIncome]);
+
+  const markIncomeReceived = useCallback((activityId: number, incomeId: number) => {
+    const income = (state.allIncome[activityId] || []).find(i => i.id === incomeId);
+    if (!income) return;
+
+    const updates: Partial<Income> = {
+      actual_amount: income.projected_amount,
+      actual_date: new Date().toISOString().split('T')[0],
+      status: 'actual',
+    };
+
+    updateIncome(activityId, incomeId, updates);
+  }, [state.allIncome, updateIncome]);
+
+  const createCooperator = useCallback((data: Partial<Cooperator>): Cooperator => {
+    const cooperator: Cooperator = {
+      id: state.nextId,
+      name: data.name || '',
+      full_name: data.full_name || null,
+      contact_name: data.contact_name,
+      email: data.email,
+      phone: data.phone,
+      address: data.address,
+      notes: data.notes,
+    };
+    dispatch({ type: 'ADD_COOPERATOR', payload: cooperator });
+    return cooperator;
+  }, [state.nextId]);
+
+  const updateCooperator = useCallback((id: number, updates: Partial<Cooperator>) => {
+    dispatch({ type: 'UPDATE_COOPERATOR', payload: { id, updates } });
+    // Update cooperator_name on any activities that reference this cooperator
+    if (updates.name) {
+      state.activities
+        .filter(a => a.cooperator_id === id)
+        .forEach(a => {
+          dispatch({
+            type: 'UPDATE_ACTIVITY',
+            payload: { id: a.id, updates: { cooperator_name: updates.name } },
+          });
+        });
+    }
+  }, [state.activities]);
+
+  const deleteCooperator = useCallback((id: number): boolean => {
+    const hasActivities = state.activities.some(a => a.cooperator_id === id);
+    if (hasActivities) return false;
+    dispatch({ type: 'DELETE_COOPERATOR', payload: id });
+    return true;
+  }, [state.activities]);
+
+  const createCategory = useCallback((data: Partial<ExpenseCategory>): ExpenseCategory => {
+    const category: ExpenseCategory = {
+      id: state.nextId,
+      name: data.name || '',
+      description: data.description || null,
+    };
+    dispatch({ type: 'ADD_CATEGORY', payload: category });
+    return category;
+  }, [state.nextId]);
+
+  const updateCategory = useCallback((id: number, updates: Partial<ExpenseCategory>) => {
+    dispatch({ type: 'UPDATE_CATEGORY', payload: { id, updates } });
+    // Update category_name on any expenses that reference this category
+    if (updates.name) {
+      Object.entries(state.allExpenses).forEach(([activityId, expenses]) => {
+        expenses.forEach(e => {
+          if (e.category_id === id) {
+            dispatch({
+              type: 'UPDATE_EXPENSE',
+              payload: {
+                activityId: Number(activityId),
+                expenseId: e.id,
+                updates: { category_name: updates.name },
+              },
+            });
+          }
+        });
+      });
+    }
+  }, [state.allExpenses]);
+
+  const deleteCategory = useCallback((id: number): boolean => {
+    const hasExpenses = Object.values(state.allExpenses)
+      .flat()
+      .some(e => e.category_id === id);
+    if (hasExpenses) return false;
+    dispatch({ type: 'DELETE_CATEGORY', payload: id });
+    return true;
+  }, [state.allExpenses]);
+
+  const createTemplate = useCallback((data: Omit<ExpenseTemplate, 'id'>): ExpenseTemplate => {
+    const template: ExpenseTemplate = { id: state.nextId, ...data };
+    dispatch({ type: 'ADD_TEMPLATE', payload: template });
+    return template;
+  }, [state.nextId]);
+
+  const updateTemplate = useCallback((id: number, updates: Partial<ExpenseTemplate>) => {
+    dispatch({ type: 'UPDATE_TEMPLATE', payload: { id, updates } });
+  }, []);
+
+  const deleteTemplate = useCallback((id: number) => {
+    dispatch({ type: 'DELETE_TEMPLATE', payload: id });
+  }, []);
 
   const linkAccount = useCallback(async (_username: string, _password: string): Promise<boolean> => {
     dispatch({ type: 'SET_LINKED', payload: true });
@@ -577,10 +1111,11 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       allIncome: state.allIncome,
       cooperators: state.cooperators,
       categories: state.categories,
+      templates: state.templates,
       nextId: state.nextId,
     };
     return JSON.stringify(data, null, 2);
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.templates, state.nextId]);
 
   const importFromJSON = useCallback((json: string): boolean => {
     try {
@@ -592,6 +1127,14 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       return false;
     }
   }, []);
+
+  const computeActivityFinancials = useCallback((activityId: number): ActivityFinancials | null => {
+    const activity = state.activities.find(a => a.id === activityId);
+    if (!activity) return null;
+    const expenses = state.allExpenses[activityId] || [];
+    const income = state.allIncome[activityId] || [];
+    return computeFinancials(activity, expenses, income);
+  }, [state.activities, state.allExpenses, state.allIncome]);
 
   return (
     <BudgetContext.Provider
@@ -605,12 +1148,32 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         loadDashboard,
         createActivity,
         updateActivity,
+        deleteActivity,
         createExpense,
+        updateExpense,
+        deleteExpense,
+        duplicateExpense,
+        convertExpenseToActual,
+        createIncome,
+        updateIncome,
+        deleteIncome,
+        markIncomeReceived,
+        selectActivity,
+        createCooperator,
+        updateCooperator,
+        deleteCooperator,
+        createCategory,
+        updateCategory,
+        deleteCategory,
+        createTemplate,
+        updateTemplate,
+        deleteTemplate,
         linkAccount,
         clearError,
         loadSampleData,
         exportToJSON,
         importFromJSON,
+        computeActivityFinancials,
       }}
     >
       {children}

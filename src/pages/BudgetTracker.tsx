@@ -1,16 +1,24 @@
 import { useState } from 'react';
 import { BudgetProvider } from '../features/budget/context/BudgetContext';
-import { Dashboard, ActivityList } from '../features/budget/components';
+import { Dashboard, ActivityList, ReportsView, SettingsView } from '../features/budget/components';
 
-type Tab = 'dashboard' | 'activities';
+type Tab = 'dashboard' | 'activities' | 'reports' | 'settings';
 
 function BudgetContent() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [cooperatorFilter, setCooperatorFilter] = useState<number | undefined>();
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'activities', label: 'Activities' },
+    { id: 'reports', label: 'Reports' },
+    { id: 'settings', label: 'Settings' },
   ];
+
+  const handleNavigateToActivities = (cooperatorId?: number) => {
+    setCooperatorFilter(cooperatorId);
+    setActiveTab('activities');
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -33,7 +41,10 @@ function BudgetContent() {
             {tabs.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id !== 'activities') setCooperatorFilter(undefined);
+                }}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-600 dark:text-blue-400'
@@ -49,8 +60,10 @@ function BudgetContent() {
 
       {/* Content */}
       <main className="flex-1 p-4 overflow-auto bg-gray-50 dark:bg-gray-900">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'activities' && <ActivityList />}
+        {activeTab === 'dashboard' && <Dashboard onNavigateToActivities={handleNavigateToActivities} />}
+        {activeTab === 'activities' && <ActivityList initialCooperatorFilter={cooperatorFilter} />}
+        {activeTab === 'reports' && <ReportsView />}
+        {activeTab === 'settings' && <SettingsView />}
       </main>
     </div>
   );
