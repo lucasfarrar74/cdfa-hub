@@ -184,7 +184,7 @@ export function ProjectsOverview() {
       {/* Footer */}
       <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
         <a
-          href="/project-manager"
+          href="/projects"
           className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
         >
           View all projects →

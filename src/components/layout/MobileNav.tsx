@@ -9,7 +9,7 @@ import { cn } from '../../lib/utils';
 
 const navItems = [
   { path: '/', label: 'Home', icon: HomeIcon },
-  { path: '/project-manager', label: 'Projects', icon: ClipboardDocumentListIcon },
+  { path: '/projects', label: 'Projects', icon: ClipboardDocumentListIcon },
   { path: '/meeting-scheduler', label: 'Meetings', icon: CalendarIcon },
   { path: '/budget-tracker', label: 'Budget', icon: CurrencyDollarIcon },
 ];
