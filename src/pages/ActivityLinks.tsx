@@ -7,6 +7,7 @@ import {
 import { ActivityLinkCard } from '../components/linking/ActivityLinkCard';
 import { CreateActivityModal } from '../components/linking/CreateActivityModal';
 import { useProjectBridge, getMeetingSchedulerIframeUrl } from '../hooks/useProjectBridge';
+import { useActivityBridge, getProjectManagerIframeUrl } from '../hooks/useActivityBridge';
 import type { ActivityLink, ActivityLinkFormData } from '../types/linking';
 import { ACTIVITY_LINKS_STORAGE_KEY } from '../types/linking';
 
@@ -43,6 +44,7 @@ export function ActivityLinks() {
   const [creatingScheduleForId, setCreatingScheduleForId] = useState<string | null>(null);
 
   const { isReady, isCreating, error, createProject, iframeRef } = useProjectBridge();
+  const { createActivity: createPMActivity, iframeRef: pmIframeRef } = useActivityBridge();
 
   // Load activity links on mount
   useEffect(() => {
@@ -56,7 +58,7 @@ export function ActivityLinks() {
     }
   }, [activityLinks]);
 
-  const handleAddActivity = useCallback((formData: ActivityLinkFormData) => {
+  const handleAddActivity = useCallback(async (formData: ActivityLinkFormData) => {
     const now = new Date().toISOString();
     const newLink: ActivityLink = {
       id: generateId(),
@@ -67,7 +69,10 @@ export function ActivityLinks() {
 
     setActivityLinks(prev => [...prev, newLink]);
     setIsModalOpen(false);
-  }, []);
+
+    // Also create the activity in Project Manager (fire and forget)
+    createPMActivity(newLink);
+  }, [createPMActivity]);
 
   const handleDeleteActivity = useCallback((activityId: string) => {
     if (!window.confirm('Are you sure you want to delete this activity link?')) {
@@ -197,6 +202,20 @@ export function ActivityLinks() {
         ref={iframeRef}
         src={getMeetingSchedulerIframeUrl()}
         title="Meeting Scheduler Bridge"
+        style={{
+          position: 'absolute',
+          width: '1px',
+          height: '1px',
+          left: '-9999px',
+          top: '-9999px',
+        }}
+      />
+
+      {/* Hidden iframe for Project Manager communication */}
+      <iframe
+        ref={pmIframeRef}
+        src={getProjectManagerIframeUrl()}
+        title="Project Manager Bridge"
         style={{
           position: 'absolute',
           width: '1px',
