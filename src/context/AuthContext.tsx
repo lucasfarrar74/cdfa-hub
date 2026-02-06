@@ -33,10 +33,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Default user for development (no login required)
+const DEFAULT_USER: AuthUser = {
+  uid: 'local-dev-user',
+  email: 'lucas@cdfa.local',
+  displayName: 'Lucas Farrar',
+  photoURL: null,
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [idToken, setIdToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Start with default user - no login required for solo development
+  const [user, setUser] = useState<AuthUser | null>(DEFAULT_USER);
+  const [idToken, setIdToken] = useState<string | null>('dev-token');
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isConfigured = isFirebaseConfigured();
 

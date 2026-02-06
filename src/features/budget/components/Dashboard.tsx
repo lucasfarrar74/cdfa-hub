@@ -1,6 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useBudget } from '../context/BudgetContext';
-import { LinkAccountForm } from './LinkAccountForm';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -62,25 +61,37 @@ export default function Dashboard() {
   const {
     dashboardSummary,
     isLoading,
-    isLinked,
     error,
     loadDashboard,
     loadActivities,
     activities,
   } = useBudget();
 
+  const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
+
   useEffect(() => {
-    if (isLinked) {
-      loadDashboard();
-      loadActivities();
-    }
-  }, [isLinked, loadDashboard, loadActivities]);
+    // Set a timeout to show empty state if backend doesn't respond
+    const timeout = setTimeout(() => {
+      setHasAttemptedLoad(true);
+    }, 3000); // 3 second timeout
 
-  if (!isLinked) {
-    return <LinkAccountForm />;
-  }
+    const load = async () => {
+      try {
+        await Promise.all([loadDashboard(), loadActivities()]);
+      } catch {
+        // Ignore errors - we'll show empty state
+      } finally {
+        clearTimeout(timeout);
+        setHasAttemptedLoad(true);
+      }
+    };
+    load();
 
-  if (isLoading && !dashboardSummary) {
+    return () => clearTimeout(timeout);
+  }, [loadDashboard, loadActivities]);
+
+  // Show loading only on first load, not indefinitely
+  if (isLoading && !hasAttemptedLoad) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="flex flex-col items-center gap-3">
@@ -91,24 +102,24 @@ export default function Dashboard() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800 font-medium">Error loading data</p>
-        <p className="text-red-600 text-sm mt-1">{error}</p>
-      </div>
-    );
-  }
-
   const summary = dashboardSummary;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Budget Dashboard</h1>
-        <p className="text-gray-600 mt-1">Track expenses and budget utilization</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Budget Dashboard</h1>
+        <p className="text-gray-600 dark:text-gray-400 mt-1">Track expenses and budget utilization</p>
       </div>
+
+      {/* Backend Connection Notice */}
+      {error && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+          <p className="text-amber-800 dark:text-amber-200 text-sm">
+            Budget Tracker backend is not connected. Start the Flask server to sync budget data.
+          </p>
+        </div>
+      )}
 
       {/* Summary Stats */}
       {summary && (
@@ -141,14 +152,15 @@ export default function Dashboard() {
       )}
 
       {/* Recent Activities */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Activities</h2>
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Activities</h2>
         </div>
 
         {activities.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            No activities found. Create one to get started.
+          <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+            <p>No budget activities yet.</p>
+            <p className="text-sm mt-2">Budget tracking data will appear here when the Flask backend is running.</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-200">

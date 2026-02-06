@@ -60,7 +60,7 @@ const initialState: BudgetState = {
   categories: [],
   dashboardSummary: null,
   isLoading: false,
-  isLinked: false,
+  isLinked: true, // No login required for solo development
   error: null,
 };
 
@@ -126,23 +126,23 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(budgetReducer, initialState);
   const { idToken } = useAuth();
 
-  // Check if user is linked on mount
-  useEffect(() => {
-    async function checkLink() {
-      if (!idToken) {
-        dispatch({ type: 'SET_LINKED', payload: false });
-        return;
-      }
-
-      try {
-        await api.getCurrentUser(idToken);
-        dispatch({ type: 'SET_LINKED', payload: true });
-      } catch {
-        dispatch({ type: 'SET_LINKED', payload: false });
-      }
-    }
-    checkLink();
-  }, [idToken]);
+  // Skip link check for solo development - always linked
+  // When ready for team use, restore the API check:
+  // useEffect(() => {
+  //   async function checkLink() {
+  //     if (!idToken) {
+  //       dispatch({ type: 'SET_LINKED', payload: false });
+  //       return;
+  //     }
+  //     try {
+  //       await api.getCurrentUser(idToken);
+  //       dispatch({ type: 'SET_LINKED', payload: true });
+  //     } catch {
+  //       dispatch({ type: 'SET_LINKED', payload: false });
+  //     }
+  //   }
+  //   checkLink();
+  // }, [idToken]);
 
   // Load reference data when linked
   useEffect(() => {
