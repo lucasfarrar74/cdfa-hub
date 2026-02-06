@@ -6,8 +6,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { ActivityLinkCard } from '../components/linking/ActivityLinkCard';
 import { CreateActivityModal } from '../components/linking/CreateActivityModal';
-import { useProjects } from '../features/projects/context/ProjectsContext';
-import { useSchedule } from '../features/scheduler/context/ScheduleContext';
+import { ProjectsProvider, useProjects } from '../features/projects/context/ProjectsContext';
+import { ScheduleProvider, useSchedule } from '../features/scheduler/context/ScheduleContext';
 import type { ActivityLink, ActivityLinkFormData } from '../types/linking';
 import { ACTIVITY_LINKS_STORAGE_KEY } from '../types/linking';
 
@@ -38,7 +38,7 @@ function saveActivityLinks(links: ActivityLink[]): void {
   }
 }
 
-export function ActivityLinks() {
+function ActivityLinksContent() {
   const [activityLinks, setActivityLinks] = useState<ActivityLink[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [creatingScheduleForId, setCreatingScheduleForId] = useState<string | null>(null);
@@ -219,5 +219,15 @@ export function ActivityLinks() {
         onSubmit={handleAddActivity}
       />
     </div>
+  );
+}
+
+export function ActivityLinks() {
+  return (
+    <ProjectsProvider>
+      <ScheduleProvider>
+        <ActivityLinksContent />
+      </ScheduleProvider>
+    </ProjectsProvider>
   );
 }

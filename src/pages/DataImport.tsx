@@ -18,7 +18,7 @@ import {
   type MappedSupplier,
 } from '../utils/excelParser';
 import { cn } from '../lib/utils';
-import { useSchedule } from '../features/scheduler/context/ScheduleContext';
+import { ScheduleProvider, useSchedule } from '../features/scheduler/context/ScheduleContext';
 
 type ImportStep = 'upload' | 'map' | 'preview' | 'complete';
 
@@ -28,7 +28,7 @@ interface ImportResult {
   error?: string;
 }
 
-export function DataImport() {
+function DataImportContent() {
   const [currentStep, setCurrentStep] = useState<ImportStep>('upload');
   const [parseResult, setParseResult] = useState<ExcelParseResult | null>(null);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(null);
@@ -373,5 +373,13 @@ export function DataImport() {
         )}
       </div>
     </div>
+  );
+}
+
+export function DataImport() {
+  return (
+    <ScheduleProvider>
+      <DataImportContent />
+    </ScheduleProvider>
   );
 }
