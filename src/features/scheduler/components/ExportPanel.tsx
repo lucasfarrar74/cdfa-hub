@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
 import { formatTime, formatDateRange, formatDateReadable, getUniqueDatesFromSlots } from '../utils/timeUtils';
 import { jsPDF } from 'jspdf';
@@ -7,6 +8,17 @@ import {
   exportBuyerScheduleToWord,
   exportMasterScheduleToWord,
 } from '../utils/exportWord';
+
+// Safe wrapper for formatTime - handles both Date objects and serialized strings
+function safeFormatTime(time: Date | string): string {
+  try {
+    const date = time instanceof Date ? time : new Date(time);
+    if (isNaN(date.getTime())) return '??:??';
+    return formatTime(date);
+  } catch {
+    return '??:??';
+  }
+}
 
 export default function ExportPanel() {
   const {
@@ -20,15 +32,25 @@ export default function ExportPanel() {
     resetAllData,
   } = useSchedule();
 
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const getBuyer = (id: string) => buyers.find(b => b.id === id);
   const getSupplier = (id: string) => suppliers.find(s => s.id === id);
   const getSlot = (id: string) => timeSlots.find(s => s.id === id);
 
-  const meetingSlots = timeSlots.filter(s => !s.isBreak);
-  const activeMeetings = meetings.filter(m => m.status !== 'cancelled' && m.status !== 'bumped');
-  const dates = getUniqueDatesFromSlots(timeSlots);
+  const meetingSlots = (timeSlots || []).filter(s => !s.isBreak);
+  const activeMeetings = (meetings || []).filter(m => m.status !== 'cancelled' && m.status !== 'bumped');
+  const dates = getUniqueDatesFromSlots(timeSlots || []);
   const isMultiDay = dates.length > 1;
-  const dateRangeStr = eventConfig ? formatDateRange(eventConfig.startDate, eventConfig.endDate) : '';
+
+  let dateRangeStr = '';
+  try {
+    if (eventConfig?.startDate && eventConfig?.endDate) {
+      dateRangeStr = formatDateRange(eventConfig.startDate, eventConfig.endDate);
+    }
+  } catch {
+    dateRangeStr = '';
+  }
 
   // Helper to add professional header to PDF
   const addPdfHeader = (doc: jsPDF, title: string): number => {
@@ -79,6 +101,8 @@ export default function ExportPanel() {
   };
 
   const exportSupplierPDF = () => {
+    setExportError(null);
+    try {
     const doc = new jsPDF();
 
     suppliers.forEach((supplier, supplierIndex) => {
@@ -135,8 +159,8 @@ export default function ExportPanel() {
         }
 
         const timeStr = isMultiDay
-          ? `${formatDateReadable(slot.date).split(',')[0]} ${formatTime(slot.startTime)}`
-          : formatTime(slot.startTime);
+          ? `${formatDateReadable(slot.date).split(',')[0]} ${safeFormatTime(slot.startTime)}`
+          : safeFormatTime(slot.startTime);
         doc.text(`${timeStr}: ${buyer?.name || '-'}`, 20, y);
         y += 5;
       });
@@ -144,9 +168,15 @@ export default function ExportPanel() {
 
     addPdfFooter(doc);
     doc.save('schedule-by-supplier.pdf');
+    } catch (err) {
+      console.error('Supplier PDF export failed:', err);
+      setExportError(`Supplier PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const exportBuyerPDF = () => {
+    setExportError(null);
+    try {
     const doc = new jsPDF();
 
     buyers.forEach((buyer, buyerIndex) => {
@@ -186,8 +216,8 @@ export default function ExportPanel() {
         }
 
         const timeStr = isMultiDay
-          ? `${formatDateReadable(slot.date).split(',')[0]} ${formatTime(slot.startTime)}`
-          : formatTime(slot.startTime);
+          ? `${formatDateReadable(slot.date).split(',')[0]} ${safeFormatTime(slot.startTime)}`
+          : safeFormatTime(slot.startTime);
         doc.text(`${timeStr}: ${supplier?.companyName || '-'}`, 20, y);
         y += 5;
       });
@@ -195,9 +225,15 @@ export default function ExportPanel() {
 
     addPdfFooter(doc);
     doc.save('schedule-by-buyer.pdf');
+    } catch (err) {
+      console.error('Buyer PDF export failed:', err);
+      setExportError(`Buyer PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const exportMasterPDF = () => {
+    setExportError(null);
+    try {
     const doc = new jsPDF('landscape');
 
     // Professional header for landscape
@@ -265,7 +301,7 @@ export default function ExportPanel() {
         }
 
         doc.setFontSize(7);
-        doc.text(formatTime(slot.startTime), 16, y);
+        doc.text(safeFormatTime(slot.startTime), 16, y);
         suppliers.forEach((supplier, i) => {
           const meeting = activeMeetings.find(
             m => m.supplierId === supplier.id && m.timeSlotId === slot.id
@@ -281,9 +317,15 @@ export default function ExportPanel() {
 
     addPdfFooter(doc);
     doc.save('master-schedule.pdf');
+    } catch (err) {
+      console.error('Master PDF export failed:', err);
+      setExportError(`Master PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const exportExcel = () => {
+    setExportError(null);
+    try {
     const wb = XLSX.utils.book_new();
 
     // Master grid sheet with professional header
@@ -296,7 +338,7 @@ export default function ExportPanel() {
     ];
     const gridRows = meetingSlots.map(slot => {
       const row = [
-        formatTime(slot.startTime),
+        safeFormatTime(slot.startTime),
         ...suppliers.map(supplier => {
           const meeting = activeMeetings.find(
             m => m.supplierId === supplier.id && m.timeSlotId === slot.id
@@ -335,7 +377,7 @@ export default function ExportPanel() {
     ];
     const supplierRows = meetingSlots.map(slot => {
       const row = [
-        formatTime(slot.startTime),
+        safeFormatTime(slot.startTime),
         ...suppliers.map(supplier => {
           const meeting = activeMeetings.filter(m => m.supplierId === supplier.id)
             .find(m => m.timeSlotId === slot.id);
@@ -364,7 +406,7 @@ export default function ExportPanel() {
     ];
     const buyerRows = meetingSlots.map(slot => {
       const row = [
-        formatTime(slot.startTime),
+        safeFormatTime(slot.startTime),
         ...buyers.map(buyer => {
           const meeting = activeMeetings.filter(m => m.buyerId === buyer.id)
             .find(m => m.timeSlotId === slot.id);
@@ -395,7 +437,7 @@ export default function ExportPanel() {
       const supplier = getSupplier(m.supplierId);
       return {
         ...(isMultiDay ? { Date: slot ? formatDateReadable(slot.date) : '' } : {}),
-        Time: slot ? formatTime(slot.startTime) : '',
+        Time: slot ? safeFormatTime(slot.startTime) : '',
         Supplier: supplier?.companyName || '',
         'Primary Contact': supplier?.primaryContact.name || '',
         'Primary Email': supplier?.primaryContact.email || '',
@@ -423,6 +465,10 @@ export default function ExportPanel() {
     XLSX.utils.book_append_sheet(wb, meetingsSheet, 'All Meetings');
 
     XLSX.writeFile(wb, 'schedule.xlsx');
+    } catch (err) {
+      console.error('Excel export failed:', err);
+      setExportError(`Excel export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const handleExportJSON = () => {
@@ -484,6 +530,20 @@ export default function ExportPanel() {
 
   return (
     <div className="space-y-6">
+      {exportError && (
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md p-4">
+          <div className="flex justify-between items-start">
+            <p className="text-sm text-red-700 dark:text-red-400">{exportError}</p>
+            <button
+              onClick={() => setExportError(null)}
+              className="text-red-500 hover:text-red-700 dark:hover:text-red-300 ml-4"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Export Schedule</h2>
 
@@ -526,9 +586,16 @@ export default function ExportPanel() {
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Word Documents</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <button
-                onClick={() => eventConfig && exportSupplierScheduleToWord({
-                  eventConfig, suppliers, buyers, meetings, timeSlots
-                })}
+                onClick={async () => {
+                  if (!eventConfig) return;
+                  setExportError(null);
+                  try {
+                    await exportSupplierScheduleToWord({ eventConfig, suppliers, buyers, meetings, timeSlots });
+                  } catch (err) {
+                    console.error('Supplier Word export failed:', err);
+                    setExportError(`Word export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                  }
+                }}
                 className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
               >
                 <div className="text-2xl mb-2">📘</div>
@@ -537,9 +604,16 @@ export default function ExportPanel() {
               </button>
 
               <button
-                onClick={() => eventConfig && exportBuyerScheduleToWord({
-                  eventConfig, suppliers, buyers, meetings, timeSlots
-                })}
+                onClick={async () => {
+                  if (!eventConfig) return;
+                  setExportError(null);
+                  try {
+                    await exportBuyerScheduleToWord({ eventConfig, suppliers, buyers, meetings, timeSlots });
+                  } catch (err) {
+                    console.error('Buyer Word export failed:', err);
+                    setExportError(`Word export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                  }
+                }}
                 className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
               >
                 <div className="text-2xl mb-2">📘</div>
@@ -548,9 +622,16 @@ export default function ExportPanel() {
               </button>
 
               <button
-                onClick={() => eventConfig && exportMasterScheduleToWord({
-                  eventConfig, suppliers, buyers, meetings, timeSlots
-                })}
+                onClick={async () => {
+                  if (!eventConfig) return;
+                  setExportError(null);
+                  try {
+                    await exportMasterScheduleToWord({ eventConfig, suppliers, buyers, meetings, timeSlots });
+                  } catch (err) {
+                    console.error('Master Word export failed:', err);
+                    setExportError(`Word export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                  }
+                }}
                 className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
               >
                 <div className="text-2xl mb-2">📘</div>

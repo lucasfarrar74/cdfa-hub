@@ -21,6 +21,17 @@ import { saveAs } from 'file-saver';
 import type { EventConfig, Supplier, Buyer, Meeting, TimeSlot } from '../types';
 import { formatTime, formatDateRange, formatDateReadable, getUniqueDatesFromSlots } from './timeUtils';
 
+// Safe wrapper for formatTime - handles both Date objects and serialized strings
+function safeFormatTime(time: Date | string): string {
+  try {
+    const date = time instanceof Date ? time : new Date(time);
+    if (isNaN(date.getTime())) return '??:??';
+    return formatTime(date);
+  } catch {
+    return '??:??';
+  }
+}
+
 interface ExportData {
   eventConfig: EventConfig;
   suppliers: Supplier[];
@@ -242,12 +253,12 @@ export async function exportSupplierScheduleToWord(data: ExportData): Promise<vo
         children: isMultiDay
           ? [
               createDataCell(formatDateReadable(slot.date), isAlt),
-              createDataCell(formatTime(slot.startTime), isAlt),
+              createDataCell(safeFormatTime(slot.startTime), isAlt),
               createDataCell(buyer?.name || '-', isAlt),
               createDataCell(buyer?.organization || '-', isAlt),
             ]
           : [
-              createDataCell(formatTime(slot.startTime), isAlt),
+              createDataCell(safeFormatTime(slot.startTime), isAlt),
               createDataCell(buyer?.name || '-', isAlt),
               createDataCell(buyer?.organization || '-', isAlt),
             ],
@@ -347,12 +358,12 @@ export async function exportBuyerScheduleToWord(data: ExportData): Promise<void>
         children: isMultiDay
           ? [
               createDataCell(formatDateReadable(slot.date), isAlt),
-              createDataCell(formatTime(slot.startTime), isAlt),
+              createDataCell(safeFormatTime(slot.startTime), isAlt),
               createDataCell(supplier?.companyName || '-', isAlt),
               createDataCell(supplier?.primaryContact.name || '-', isAlt),
             ]
           : [
-              createDataCell(formatTime(slot.startTime), isAlt),
+              createDataCell(safeFormatTime(slot.startTime), isAlt),
               createDataCell(supplier?.companyName || '-', isAlt),
               createDataCell(supplier?.primaryContact.name || '-', isAlt),
             ],
@@ -440,7 +451,7 @@ export async function exportMasterScheduleToWord(data: ExportData): Promise<void
 
       return new TableRow({
         children: [
-          createDataCell(formatTime(slot.startTime), isAlt),
+          createDataCell(safeFormatTime(slot.startTime), isAlt),
           ...suppliers.map(supplier => {
             const meeting = activeMeetings.find(
               m => m.supplierId === supplier.id && m.timeSlotId === slot.id
