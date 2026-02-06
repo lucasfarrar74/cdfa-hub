@@ -41,13 +41,17 @@ const DEFAULT_USER: AuthUser = {
   photoURL: null,
 };
 
+// Set to true to enable Firebase auth, false for solo development
+const ENABLE_AUTH = false;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   // Start with default user - no login required for solo development
   const [user, setUser] = useState<AuthUser | null>(DEFAULT_USER);
   const [idToken, setIdToken] = useState<string | null>('dev-token');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isConfigured = isFirebaseConfigured();
+  // Disable Firebase check for solo development
+  const isConfigured = ENABLE_AUTH && isFirebaseConfigured();
 
   // Convert Firebase User to AuthUser
   const toAuthUser = (firebaseUser: User | null): AuthUser | null => {
