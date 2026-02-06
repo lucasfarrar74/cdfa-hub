@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   format,
   addMonths,
@@ -22,6 +23,7 @@ type ZoomLevel = 'month' | 'quarter' | 'year';
 
 export default function TimelineView() {
   const { filteredActivities, selectActivity, getActivityTypeInfo, customActivityTypes } = useProjects();
+  const navigate = useNavigate();
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('quarter');
   const [viewStart, setViewStart] = useState(() => startOfMonth(new Date()));
   const [categoryFilter, setCategoryFilter] = useState<ActivityCategory | 'all'>('all');
@@ -467,7 +469,7 @@ export default function TimelineView() {
                   {/* Activity name and details */}
                   <div
                     className="w-64 flex-shrink-0 border-r dark:border-gray-600 px-4 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-3"
-                    onClick={() => selectActivity(activity.id)}
+                    onClick={() => { selectActivity(activity.id); navigate(`/projects/activities?activityId=${activity.id}`); }}
                   >
                     <div className={`p-1.5 rounded-md ${
                       category === 'trade' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400' :
@@ -542,7 +544,7 @@ export default function TimelineView() {
                         width: `${Math.max(position.width, 1)}%`,
                         minWidth: '12px',
                       }}
-                      onClick={() => selectActivity(activity.id)}
+                      onClick={() => { selectActivity(activity.id); navigate(`/projects/activities?activityId=${activity.id}`); }}
                       title={`${activity.name}\n${format(parseISO(activity.startDate), 'MMM d, yyyy')} - ${format(
                         parseISO(activity.endDate || activity.startDate),
                         'MMM d, yyyy'

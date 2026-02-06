@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format, addMonths, subMonths, addYears, subYears } from 'date-fns';
 import { useProjects } from '../context/ProjectsContext';
 import MonthView from './MonthView';
@@ -11,6 +12,12 @@ export default function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const { filteredActivities, selectActivity } = useProjects();
+  const navigate = useNavigate();
+
+  const handleActivityClick = (activity: { id: string }) => {
+    selectActivity(activity.id);
+    navigate(`/projects/activities?activityId=${activity.id}`);
+  };
 
   const handlePrevious = () => {
     switch (viewMode) {
@@ -144,7 +151,7 @@ export default function CalendarView() {
           <MonthView
             currentDate={currentDate}
             activities={filteredActivities}
-            onActivityClick={(activity) => selectActivity(activity.id)}
+            onActivityClick={handleActivityClick}
             onDateClick={(date) => console.log('Date clicked:', date)}
           />
         )}
@@ -152,7 +159,7 @@ export default function CalendarView() {
           <QuarterView
             currentDate={currentDate}
             activities={filteredActivities}
-            onActivityClick={(activity) => selectActivity(activity.id)}
+            onActivityClick={handleActivityClick}
             onMonthClick={(date) => {
               setCurrentDate(date);
               setViewMode('month');
@@ -163,7 +170,7 @@ export default function CalendarView() {
           <YearView
             year={currentDate.getFullYear()}
             activities={filteredActivities}
-            onActivityClick={(activity) => selectActivity(activity.id)}
+            onActivityClick={handleActivityClick}
             onMonthClick={(date) => {
               setCurrentDate(date);
               setViewMode('month');

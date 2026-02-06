@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format, parseISO, addDays, isBefore, isAfter, startOfDay } from 'date-fns';
 import { useProjects } from '../context/ProjectsContext';
 import type { AnyActivity, ChecklistItem, ActivityType } from '../types';
@@ -20,9 +21,15 @@ export default function Dashboard() {
     getActivityTypeInfo,
   } = useProjects();
 
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showDataPanel, setShowDataPanel] = useState(false);
+
+  const navigateToActivity = (activityId: string) => {
+    selectActivity(activityId);
+    navigate(`/projects/activities?activityId=${activityId}`);
+  };
   const [showNewActivityMenu, setShowNewActivityMenu] = useState(false);
 
   const handleExport = () => {
@@ -485,7 +492,7 @@ export default function Dashboard() {
                 <div
                   key={activity.id}
                   className="px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
-                  onClick={() => selectActivity(activity.id)}
+                  onClick={() => navigateToActivity(activity.id)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3">
@@ -526,7 +533,7 @@ export default function Dashboard() {
                   <div
                     key={item.id}
                     className="px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors bg-red-50 dark:bg-red-900/30"
-                    onClick={() => selectActivity(activity.id)}
+                    onClick={() => navigateToActivity(activity.id)}
                   >
                     <div className="flex items-start gap-3">
                       <span className="w-2 h-2 rounded-full mt-2 bg-red-500" />
@@ -544,7 +551,7 @@ export default function Dashboard() {
                   <div
                     key={item.id}
                     className="px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
-                    onClick={() => selectActivity(activity.id)}
+                    onClick={() => navigateToActivity(activity.id)}
                   >
                     <div className="flex items-start gap-3">
                       <span className="w-2 h-2 rounded-full mt-2 bg-yellow-500" />
