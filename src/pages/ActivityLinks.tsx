@@ -75,13 +75,11 @@ function ActivityLinksContent() {
 
     // Also create the activity in Project Manager
     try {
-      createActivity({
+      createActivity('outbound_trade_mission', {
         name: formData.name,
-        type: formData.type,
         startDate: formData.startDate,
         endDate: formData.endDate,
         location: formData.location,
-        description: formData.description,
         status: 'planning',
       });
     } catch (err) {
