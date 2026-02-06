@@ -69,38 +69,10 @@ export interface ProjectResultMessage {
 export const ACTIVITY_LINKS_STORAGE_KEY = 'cdfa-hub-activity-links';
 
 /**
- * Get the Budget Tracker URL with pre-filled parameters
+ * Get the internal Budget Tracker route
  */
-export function getBudgetTrackerCreateUrl(activity: ActivityLink): string {
-  const params = new URLSearchParams({
-    cdfa_activity_id: activity.id,
-    name: activity.name,
-  });
-
-  if (activity.startDate) {
-    params.set('start_date', activity.startDate);
-  }
-  if (activity.endDate) {
-    params.set('end_date', activity.endDate);
-  }
-
-  // Use localhost for development
-  const baseUrl = import.meta.env.DEV
-    ? 'http://localhost:5000'
-    : 'https://budget-tracker-three-kappa.vercel.app'; // TODO: Update with production URL
-
-  return `${baseUrl}/activities/create?${params.toString()}`;
-}
-
-/**
- * Get the Budget Tracker URL to view an existing activity
- */
-export function getBudgetTrackerViewUrl(budgetActivityId: string): string {
-  const baseUrl = import.meta.env.DEV
-    ? 'http://localhost:5000'
-    : 'https://budget-tracker-three-kappa.vercel.app';
-
-  return `${baseUrl}/activities/${budgetActivityId}`;
+export function getBudgetTrackerUrl(): string {
+  return '/budget-tracker';
 }
 
 /**

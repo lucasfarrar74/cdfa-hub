@@ -11,8 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import type { ActivityLink } from '../../types/linking';
 import {
-  getBudgetTrackerCreateUrl,
-  getBudgetTrackerViewUrl,
+  getBudgetTrackerUrl,
   getMeetingSchedulerUrl,
 } from '../../types/linking';
 import { cn } from '../../lib/utils';
@@ -21,18 +20,22 @@ interface ActivityLinkCardProps {
   activity: ActivityLink;
   onCreateProjectManagerActivity: (activity: ActivityLink) => void;
   onCreateMeetingSchedule: (activity: ActivityLink) => void;
+  onCreateBudget: (activity: ActivityLink) => void;
   onDelete: (activityId: string) => void;
   isCreatingProject?: boolean;
   isCreatingSchedule?: boolean;
+  isCreatingBudget?: boolean;
 }
 
 export function ActivityLinkCard({
   activity,
   onCreateProjectManagerActivity,
   onCreateMeetingSchedule,
+  onCreateBudget,
   onDelete,
   isCreatingProject = false,
   isCreatingSchedule = false,
+  isCreatingBudget = false,
 }: ActivityLinkCardProps) {
   const hasProjectManager = !!activity.projectManagerActivityId;
   const hasMeetingSchedule = !!activity.meetingSchedulerProjectId;
@@ -224,25 +227,36 @@ export function ActivityLinkCard({
           </div>
 
           {hasBudget ? (
-            <a
-              href={getBudgetTrackerViewUrl(activity.budgetTrackerActivityId!)}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              to={getBudgetTrackerUrl()}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
             >
               <ArrowTopRightOnSquareIcon className="w-4 h-4" />
               Open
-            </a>
+            </Link>
           ) : (
-            <a
-              href={getBudgetTrackerCreateUrl(activity)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+            <button
+              onClick={() => onCreateBudget(activity)}
+              disabled={isCreatingBudget}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
+                isCreatingBudget
+                  ? "text-gray-400 bg-gray-100 dark:bg-gray-700 cursor-not-allowed"
+                  : "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+              )}
             >
-              <PlusCircleIcon className="w-4 h-4" />
-              Create
-            </a>
+              {isCreatingBudget ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <PlusCircleIcon className="w-4 h-4" />
+                  Create
+                </>
+              )}
+            </button>
           )}
         </div>
       </div>

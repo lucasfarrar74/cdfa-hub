@@ -4,10 +4,12 @@ import {
   LinkIcon,
   ExclamationCircleIcon,
 } from '@heroicons/react/24/outline';
+import { useNavigate } from 'react-router-dom';
 import { ActivityLinkCard } from '../components/linking/ActivityLinkCard';
 import { CreateActivityModal } from '../components/linking/CreateActivityModal';
 import { ProjectsProvider, useProjects } from '../features/projects/context/ProjectsContext';
 import { ScheduleProvider, useSchedule } from '../features/scheduler/context/ScheduleContext';
+import { BudgetProvider, useBudget } from '../features/budget/context/BudgetContext';
 import type { ActivityLink, ActivityLinkFormData } from '../types/linking';
 import { ACTIVITY_LINKS_STORAGE_KEY } from '../types/linking';
 
@@ -43,10 +45,13 @@ function ActivityLinksContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [creatingProjectForId, setCreatingProjectForId] = useState<string | null>(null);
   const [creatingScheduleForId, setCreatingScheduleForId] = useState<string | null>(null);
+  const [creatingBudgetForId, setCreatingBudgetForId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { createActivity } = useProjects();
   const { createProject, setEventConfig } = useSchedule();
+  const { createActivity: createBudgetActivity, cooperators, selectActivity } = useBudget();
+  const navigate = useNavigate();
 
   // Load activity links on mount
   useEffect(() => {
@@ -169,6 +174,52 @@ function ActivityLinksContent() {
     }
   }, [createProject, setEventConfig]);
 
+  const handleCreateBudget = useCallback(async (activity: ActivityLink) => {
+    setCreatingBudgetForId(activity.id);
+    setError(null);
+
+    try {
+      // Use the first cooperator or create a placeholder
+      const cooperatorId = cooperators.length > 0 ? cooperators[0].id : 1;
+
+      const budgetActivity = await createBudgetActivity({
+        name: activity.name,
+        cooperator_id: cooperatorId,
+        budget: 0,
+        start_date: activity.startDate,
+        end_date: activity.endDate,
+        location: activity.location,
+        cdfa_activity_id: activity.id,
+        status: 'planning',
+      });
+
+      if (budgetActivity) {
+        // Update the activity link with the Budget Tracker activity ID
+        setActivityLinks(prev => {
+          const updated = prev.map(a =>
+            a.id === activity.id
+              ? {
+                  ...a,
+                  budgetTrackerActivityId: String(budgetActivity.id),
+                  updatedAt: new Date().toISOString(),
+                }
+              : a
+          );
+          saveActivityLinks(updated);
+          return updated;
+        });
+
+        // Navigate to the budget tracker with the activity selected
+        selectActivity(budgetActivity.id);
+        navigate('/budget-tracker');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create budget activity');
+    } finally {
+      setCreatingBudgetForId(null);
+    }
+  }, [createBudgetActivity, cooperators, selectActivity, navigate]);
+
   return (
     <div className="max-w-6xl mx-auto p-6">
       {/* Header */}
@@ -229,9 +280,11 @@ function ActivityLinksContent() {
               activity={activity}
               onCreateProjectManagerActivity={handleCreateProjectManagerActivity}
               onCreateMeetingSchedule={handleCreateMeetingSchedule}
+              onCreateBudget={handleCreateBudget}
               onDelete={handleDeleteActivity}
               isCreatingProject={creatingProjectForId === activity.id}
               isCreatingSchedule={creatingScheduleForId === activity.id}
+              isCreatingBudget={creatingBudgetForId === activity.id}
             />
           ))}
         </div>
@@ -251,7 +304,9 @@ export function ActivityLinks() {
   return (
     <ProjectsProvider>
       <ScheduleProvider>
-        <ActivityLinksContent />
+        <BudgetProvider>
+          <ActivityLinksContent />
+        </BudgetProvider>
       </ScheduleProvider>
     </ProjectsProvider>
   );
