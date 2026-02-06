@@ -28,10 +28,16 @@ export function useActivityBridge(): UseActivityBridgeResult {
   const resolveRef = useRef<((result: { activityId: string } | null) => void) | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Listen for activity creation results
+  // Listen for bridge ready signal and activity creation results
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data;
+
+      // Listen for ready signal from Project Manager
+      if (data?.type === 'CDFA_ACTIVITY_BRIDGE_READY') {
+        setIsReady(true);
+        return;
+      }
 
       if (data?.type === 'CDFA_ACTIVITY_RESULT') {
         if (timeoutRef.current) {
@@ -61,24 +67,6 @@ export function useActivityBridge(): UseActivityBridgeResult {
       }
     };
   }, []);
-
-  // Mark iframe as ready when it loads
-  const handleIframeLoad = useCallback(() => {
-    setIsReady(true);
-  }, []);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (iframe) {
-      iframe.addEventListener('load', handleIframeLoad);
-      if (iframe.contentWindow) {
-        setIsReady(true);
-      }
-      return () => {
-        iframe.removeEventListener('load', handleIframeLoad);
-      };
-    }
-  }, [handleIframeLoad]);
 
   const createActivity = useCallback(async (activity: ActivityLink): Promise<{ activityId: string } | null> => {
     if (!iframeRef.current?.contentWindow) {
