@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { MainLayout } from './components/layout/MainLayout';
 import { LoginPage } from './components/auth/LoginPage';
 import { Dashboard } from './pages/Dashboard';
+import { Projects } from './pages/Projects';
 import { ProjectManager } from './pages/ProjectManager';
 import { MeetingScheduler } from './pages/MeetingScheduler';
 import { BudgetTracker } from './pages/BudgetTracker';
@@ -91,6 +92,7 @@ function AppRoutes() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="projects/*" element={<Projects />} />
         <Route path="project-manager" element={<ProjectManager />} />
         <Route path="meeting-scheduler" element={<MeetingScheduler />} />
         <Route path="budget-tracker" element={<BudgetTracker />} />

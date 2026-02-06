@@ -8,12 +8,20 @@ export interface Tool {
   status: 'available' | 'coming_soon';
 }
 
+export interface NavigationChild {
+  id: string;
+  label: string;
+  path: string;
+}
+
 export interface NavigationItem {
   id: string;
   label: string;
   path: string;
   icon: string;
   section: 'main' | 'tools';
+  children?: NavigationChild[];
+  hidden?: boolean;
 }
 
 export interface QuickAction {
@@ -22,6 +30,7 @@ export interface QuickAction {
   description: string;
   url: string;
   icon: string;
+  internal?: boolean;
 }
 
 export interface WidgetConfig {
