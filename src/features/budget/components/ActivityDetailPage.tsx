@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useBudget } from '../context/BudgetContext';
 import type { ActivitySummary, Expense, Income, ActivityFinancials, Participant } from '../types';
 import ExpenseForm from './ExpenseForm';
@@ -38,6 +38,8 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+const CATEGORY_COLORS = ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#20c997', '#198754', '#0dcaf0'];
 
 type DetailTab = 'overview' | 'expenses' | 'income' | 'participants';
 
@@ -96,7 +98,7 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
       existing.expenses.push(e);
       map.set(e.category_id, existing);
     }
-    return Array.from(map.entries());
+    return Array.from(map.entries()).sort((a, b) => (b[1].actual + b[1].projected) - (a[1].actual + a[1].projected));
   }, [expenses]);
 
   const sortedExpenses = useMemo(() => {
@@ -449,56 +451,150 @@ function OverviewTab({
         </div>
 
         {/* Category Breakdown */}
-        {categoryBreakdown.length > 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Budget by Category</h3>
-            <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden mb-3 flex">
-              {categoryBreakdown.map(([catId, cat], i) => {
-                const total = cat.actual + cat.projected;
-                const pct = activity.budget > 0 ? (total / activity.budget) * 100 : 0;
-                const colors = ['bg-blue-500', 'bg-green-500', 'bg-amber-500', 'bg-purple-500', 'bg-red-500', 'bg-cyan-500'];
-                return (
-                  <div
-                    key={catId}
-                    className={`${colors[i % colors.length]} transition-all`}
-                    style={{ width: `${Math.min(pct, 100)}%` }}
-                    title={`${cat.name}: ${formatCurrency(total)}`}
-                  />
-                );
-              })}
-            </div>
+        {categoryBreakdown.length > 0 && (() => {
+          const totalCommitted = categoryBreakdown.reduce((s, [, c]) => s + c.actual + c.projected, 0);
+          const totalActual = categoryBreakdown.reduce((s, [, c]) => s + c.actual, 0);
+          const totalProjected = categoryBreakdown.reduce((s, [, c]) => s + c.projected, 0);
+          const totalExpenses = categoryBreakdown.reduce((s, [, c]) => s + c.count, 0);
+          const availableBudget = Math.max(0, activity.budget - totalCommitted);
+          const availablePct = activity.budget > 0 ? (availableBudget / activity.budget) * 100 : 0;
 
-            <div className="space-y-1">
-              {categoryBreakdown.map(([catId, cat]) => (
-                <div key={catId}>
-                  <button
-                    onClick={() => setExpandedCategory(expandedCategory === catId ? null : catId)}
-                    className="w-full flex items-center justify-between py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-600/50 rounded px-2 transition-colors"
-                  >
-                    <span className="text-gray-700 dark:text-gray-300">
-                      {cat.name} <span className="text-gray-400">({cat.count})</span>
-                    </span>
-                    <span className="text-gray-900 dark:text-gray-100 font-medium">
-                      {formatCurrency(cat.actual + cat.projected)}
-                    </span>
-                  </button>
-                  {expandedCategory === catId && (
-                    <div className="ml-4 mb-2 space-y-1">
-                      {cat.expenses.map(e => (
-                        <div key={e.id} className="flex justify-between text-xs text-gray-500 dark:text-gray-400 py-0.5">
-                          <span className="truncate mr-2">{e.description}</span>
-                          <span className={e.actual_amount ? 'text-green-600 dark:text-green-400' : ''}>
-                            {formatCurrency(e.actual_amount ?? e.projected_amount ?? 0)}
-                          </span>
-                        </div>
-                      ))}
+          return (
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Budget by Category</h3>
+
+              {/* Stacked Bar - 32px */}
+              <div className="h-8 bg-gray-200 dark:bg-gray-600 rounded-lg overflow-hidden mb-3 flex">
+                {categoryBreakdown.map(([catId, cat], i) => {
+                  const total = cat.actual + cat.projected;
+                  const pct = activity.budget > 0 ? (total / activity.budget) * 100 : 0;
+                  return (
+                    <div
+                      key={catId}
+                      className="h-full flex items-center justify-center overflow-hidden transition-all"
+                      style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                      title={`${cat.name}: ${formatCurrency(total)}`}
+                    >
+                      {pct > 8 && (
+                        <span className="text-white text-xs font-medium truncate px-1">{cat.name}</span>
+                      )}
                     </div>
-                  )}
+                  );
+                })}
+                {availablePct > 0 && (
+                  <div
+                    className="h-full flex items-center justify-center overflow-hidden bg-gray-400 dark:bg-gray-500"
+                    style={{ width: `${availablePct}%` }}
+                    title={`Available: ${formatCurrency(availableBudget)}`}
+                  >
+                    {availablePct > 8 && (
+                      <span className="text-white text-xs font-medium truncate px-1">Available</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Color Legend */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4">
+                {categoryBreakdown.map(([catId, cat], i) => (
+                  <div key={catId} className="flex items-center gap-1.5">
+                    <span
+                      className="w-3 h-3 rounded-sm shrink-0"
+                      style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">{cat.name}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm shrink-0 bg-gray-400 dark:bg-gray-500" />
+                  <span className="text-xs text-gray-600 dark:text-gray-400">Available</span>
                 </div>
-              ))}
+              </div>
+
+              {/* Category Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-600">
+                      <th className="py-2 pr-2 text-left font-medium text-gray-700 dark:text-gray-300">Category</th>
+                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Expenses</th>
+                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Actual</th>
+                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Projected</th>
+                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Committed</th>
+                      <th className="py-2 pl-2 text-right font-medium text-gray-700 dark:text-gray-300">% of Budget</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoryBreakdown.map(([catId, cat], i) => {
+                      const committed = cat.actual + cat.projected;
+                      const pct = activity.budget > 0 ? (committed / activity.budget) * 100 : 0;
+                      const isExpanded = expandedCategory === catId;
+
+                      return (
+                        <Fragment key={catId}>
+                          <tr
+                            onClick={() => setExpandedCategory(isExpanded ? null : catId)}
+                            className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors border-b border-gray-100 dark:border-gray-700"
+                          >
+                            <td className="py-2 pr-2">
+                              <div className="flex items-center gap-2">
+                                <svg
+                                  className={`w-4 h-4 text-gray-400 transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+                                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                                />
+                                <span className="text-gray-900 dark:text-gray-100">{cat.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{cat.count}</td>
+                            <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{formatCurrency(cat.actual)}</td>
+                            <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{formatCurrency(cat.projected)}</td>
+                            <td className="py-2 px-2 text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(committed)}</td>
+                            <td className="py-2 pl-2 text-right text-gray-600 dark:text-gray-400">{pct.toFixed(1)}%</td>
+                          </tr>
+
+                          {/* Expanded expenses */}
+                          {isExpanded && cat.expenses.map(e => (
+                            <tr key={e.id} className="bg-gray-50 dark:bg-gray-700/30">
+                              <td colSpan={4} className="py-1.5 pl-10 pr-2">
+                                <span className="text-xs text-gray-700 dark:text-gray-300">{e.description}</span>
+                              </td>
+                              <td className="py-1.5 px-2 text-right">
+                                <span className={`text-xs ${e.actual_amount ? 'text-green-600 dark:text-green-400 font-medium' : 'text-gray-600 dark:text-gray-400'}`}>
+                                  {formatCurrency(e.actual_amount ?? e.projected_amount ?? 0)}
+                                </span>
+                              </td>
+                              <td className="py-1.5 pl-2 text-right">
+                                <StatusBadge status={e.status} />
+                              </td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-300 dark:border-gray-500 font-semibold">
+                      <td className="py-2 pr-2 text-left text-gray-900 dark:text-gray-100">Total</td>
+                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{totalExpenses}</td>
+                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalActual)}</td>
+                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalProjected)}</td>
+                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalCommitted)}</td>
+                      <td className="py-2 pl-2 text-right text-gray-900 dark:text-gray-100">
+                        {activity.budget > 0 ? ((totalCommitted / activity.budget) * 100).toFixed(1) : '0.0'}%
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
