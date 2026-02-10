@@ -154,13 +154,9 @@ export default function ChecklistPanel({ activityId }: ChecklistPanelProps) {
                     <button
                       onClick={() => {
                         const newStatus: ChecklistItemStatus =
-                          item.status === 'completed'
+                          item.status === 'completed' || item.status === 'skipped'
                             ? 'not_started'
-                            : item.status === 'not_started'
-                            ? 'in_progress'
-                            : item.status === 'in_progress'
-                            ? 'completed'
-                            : 'not_started';
+                            : 'completed';
                         handleStatusChange(item.id, newStatus);
                       }}
                       className="flex-shrink-0 mt-0.5"
