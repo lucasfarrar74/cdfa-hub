@@ -24,6 +24,17 @@ import {
   generateReminders,
 } from '../utils/reminderScheduler';
 import { useAuth } from '../../../context/AuthContext';
+import { ACTIVITY_LINKS_STORAGE_KEY } from '../../../types/linking';
+import type { ActivityLink } from '../../../types/linking';
+import {
+  sampleActivities as budgetSampleActivities,
+  sampleExpenses,
+  sampleIncome,
+  sampleCooperators,
+  sampleCategories,
+  sampleParticipants,
+  INITIAL_NEXT_ID,
+} from '../../budget/data/sampleData';
 
 // State type
 interface ProjectsState {
@@ -1029,6 +1040,60 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     ];
 
     dispatch({ type: 'SET_ACTIVITIES', payload: sampleActivities });
+
+    // Seed activity links connecting PM activities to Budget Tracker activities
+    const activityLinks: ActivityLink[] = [
+      {
+        id: uuidv4(),
+        name: sampleActivities[1].name,
+        fiscalYear: sampleActivities[1].fiscalYear,
+        startDate: sampleActivities[1].startDate,
+        endDate: sampleActivities[1].endDate,
+        location: sampleActivities[1].location,
+        projectManagerActivityId: sampleActivities[1].id,
+        budgetTrackerActivityId: '1', // FOODEX Japan 2025
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      },
+      {
+        id: uuidv4(),
+        name: sampleActivities[0].name,
+        fiscalYear: sampleActivities[0].fiscalYear,
+        startDate: sampleActivities[0].startDate,
+        endDate: sampleActivities[0].endDate,
+        location: sampleActivities[0].location,
+        projectManagerActivityId: sampleActivities[0].id,
+        budgetTrackerActivityId: '2', // Fancy Food Show
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      },
+      {
+        id: uuidv4(),
+        name: sampleActivities[2].name,
+        fiscalYear: sampleActivities[2].fiscalYear,
+        startDate: sampleActivities[2].startDate,
+        endDate: sampleActivities[2].endDate,
+        location: sampleActivities[2].location,
+        projectManagerActivityId: sampleActivities[2].id,
+        budgetTrackerActivityId: '3', // SE Asia Trade Mission
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      },
+    ];
+    localStorage.setItem(ACTIVITY_LINKS_STORAGE_KEY, JSON.stringify(activityLinks));
+
+    // Seed budget tracker data if not already present
+    if (!localStorage.getItem('cdfa-budget-tracker-data')) {
+      localStorage.setItem('cdfa-budget-tracker-data', JSON.stringify({
+        activities: budgetSampleActivities,
+        allExpenses: sampleExpenses,
+        allIncome: sampleIncome,
+        cooperators: sampleCooperators,
+        categories: sampleCategories,
+        participants: sampleParticipants,
+        nextId: INITIAL_NEXT_ID,
+      }));
+    }
   }, []);
 
   // Active activity
