@@ -450,95 +450,89 @@ export default function ActivityDashboard({ activityId, onBack }: ActivityDashbo
             {/* Right column */}
             <div className="space-y-6">
               {/* Budget Summary */}
-              {crossToolData.budget && (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Budget Summary</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Budget</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {currencyFormat.format(crossToolData.budget.budgetAmount)}
-                      </span>
+              {crossToolData.budget && (() => {
+                const { budgetAmount, committed, actual, available } = crossToolData.budget;
+                const spentPercent = budgetAmount > 0 ? Math.min((actual / budgetAmount) * 100, 100) : 0;
+                const committedPercent = budgetAmount > 0 ? Math.min((committed / budgetAmount) * 100, 100 - spentPercent) : 0;
+                return (
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Budget Summary</h3>
+                    {/* Bold stat row */}
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Budget</p>
+                        <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{currencyFormat.format(budgetAmount)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Actual Spent</p>
+                        <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{currencyFormat.format(actual)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Available</p>
+                        <p className={`text-lg font-bold ${available < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                          {currencyFormat.format(available)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Committed</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {currencyFormat.format(crossToolData.budget.committed)}
-                      </span>
+                    {/* Stacked progress bar */}
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 flex overflow-hidden">
+                      <div className="bg-emerald-500 h-3 transition-all" style={{ width: `${spentPercent}%` }} />
+                      <div className="bg-blue-500 h-3 transition-all" style={{ width: `${committedPercent}%` }} />
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Actual</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {currencyFormat.format(crossToolData.budget.actual)}
-                      </span>
+                    {/* Legend */}
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Spent</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Committed</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600 inline-block" /> Remaining</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Available</span>
-                      <span className={`font-medium ${
-                        crossToolData.budget.available < 0
-                          ? 'text-red-600 dark:text-red-400'
-                          : 'text-green-600 dark:text-green-400'
-                      }`}>
-                        {currencyFormat.format(crossToolData.budget.available)}
-                      </span>
+                    {/* Detail rows */}
+                    <div className="space-y-1.5 text-sm mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Budget</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{currencyFormat.format(budgetAmount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Committed</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{currencyFormat.format(committed)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Actual</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{currencyFormat.format(actual)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">Available</span>
+                        <span className={`font-medium ${available < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                          {currencyFormat.format(available)}
+                        </span>
+                      </div>
                     </div>
+                    <a href="/budget-tracker" className="block mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+                      View in Budget Tracker
+                    </a>
                   </div>
-                  {/* Utilization bar */}
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      <span>Utilization</span>
-                      <span>{crossToolData.budget.utilizationPercent}%</span>
-                    </div>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all ${
-                          crossToolData.budget.utilizationPercent > 100
-                            ? 'bg-red-500'
-                            : crossToolData.budget.utilizationPercent > 80
-                            ? 'bg-yellow-500'
-                            : 'bg-blue-500'
-                        }`}
-                        style={{ width: `${Math.min(crossToolData.budget.utilizationPercent, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                  <a
-                    href="/budget-tracker"
-                    className="block mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    View in Budget Tracker
-                  </a>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Meetings Summary */}
               {crossToolData.scheduler && (
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
                   <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Meetings Summary</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Meetings</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {crossToolData.scheduler.meetingCount}
-                      </span>
+                  {/* Bold stat row */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Meetings</p>
+                      <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{crossToolData.scheduler.meetingCount}</p>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Suppliers</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {crossToolData.scheduler.supplierCount}
-                      </span>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Suppliers</p>
+                      <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{crossToolData.scheduler.supplierCount}</p>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500 dark:text-gray-400">Buyers</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {crossToolData.scheduler.buyerCount}
-                      </span>
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Buyers</p>
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">{crossToolData.scheduler.buyerCount}</p>
                     </div>
                   </div>
-                  <a
-                    href="/meeting-scheduler"
-                    className="block mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                  >
+                  <a href="/meeting-scheduler" className="block mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">
                     View in Meeting Scheduler
                   </a>
                 </div>

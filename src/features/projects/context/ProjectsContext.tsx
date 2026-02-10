@@ -1094,6 +1094,40 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
         nextId: INITIAL_NEXT_ID,
       }));
     }
+
+    // Seed meeting scheduler data if not already present
+    if (!localStorage.getItem('meeting-scheduler-projects')) {
+      const schedulerProjects = [
+        {
+          id: uuidv4(),
+          name: 'FOODEX Japan 2026',
+          meetings: Array.from({ length: 12 }, () => ({ id: uuidv4(), title: 'Meeting', status: 'scheduled' })),
+          suppliers: Array.from({ length: 8 }, (_, i) => ({ id: uuidv4(), name: `Supplier ${i + 1}` })),
+          buyers: Array.from({ length: 15 }, (_, i) => ({ id: uuidv4(), name: `Buyer ${i + 1}` })),
+        },
+        {
+          id: uuidv4(),
+          name: 'Fancy Food Show 2026',
+          meetings: Array.from({ length: 8 }, () => ({ id: uuidv4(), title: 'Meeting', status: 'scheduled' })),
+          suppliers: Array.from({ length: 5 }, (_, i) => ({ id: uuidv4(), name: `Supplier ${i + 1}` })),
+          buyers: Array.from({ length: 10 }, (_, i) => ({ id: uuidv4(), name: `Buyer ${i + 1}` })),
+        },
+        {
+          id: uuidv4(),
+          name: 'SE Asia Trade Mission',
+          meetings: Array.from({ length: 18 }, () => ({ id: uuidv4(), title: 'Meeting', status: 'scheduled' })),
+          suppliers: Array.from({ length: 12 }, (_, i) => ({ id: uuidv4(), name: `Supplier ${i + 1}` })),
+          buyers: Array.from({ length: 20 }, (_, i) => ({ id: uuidv4(), name: `Buyer ${i + 1}` })),
+        },
+      ];
+      localStorage.setItem('meeting-scheduler-projects', JSON.stringify(schedulerProjects));
+
+      // Link scheduler projects to activity links
+      activityLinks[0].meetingSchedulerProjectId = schedulerProjects[0].id; // FOODEX Japan
+      activityLinks[1].meetingSchedulerProjectId = schedulerProjects[1].id; // Fancy Food Show
+      activityLinks[2].meetingSchedulerProjectId = schedulerProjects[2].id; // SE Asia Trade Mission
+      localStorage.setItem(ACTIVITY_LINKS_STORAGE_KEY, JSON.stringify(activityLinks));
+    }
   }, []);
 
   // Active activity
