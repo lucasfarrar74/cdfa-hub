@@ -5,6 +5,7 @@ import {
   ActivityList,
   CalendarView,
   TimelineView,
+  TemplateEditor,
 } from '../features/projects/components';
 
 const tabs = [
@@ -12,6 +13,7 @@ const tabs = [
   { label: 'Activities', path: '/projects/activities', end: false },
   { label: 'Calendar', path: '/projects/calendar', end: false },
   { label: 'Timeline', path: '/projects/timeline', end: false },
+  { label: 'Templates', path: '/projects/templates', end: false },
 ];
 
 export function Projects() {
@@ -44,6 +46,7 @@ export function Projects() {
             <Route path="activities" element={<ActivityList />} />
             <Route path="calendar" element={<CalendarView />} />
             <Route path="timeline" element={<TimelineView />} />
+            <Route path="templates" element={<TemplateEditor />} />
             <Route path="*" element={<Navigate to="/projects" replace />} />
           </Routes>
         </div>

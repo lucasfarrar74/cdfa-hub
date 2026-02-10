@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, addDays, isBefore, isAfter, startOfDay } from 'date-fns';
 import { useProjects } from '../context/ProjectsContext';
-import type { AnyActivity, ChecklistItem, ActivityType } from '../types';
+import type { AnyActivity, ChecklistItem, ActivityType, ActivityCategory } from '../types';
 import { getActivityCategory, ACTIVITY_TYPES } from '../types';
 import { getFiscalYear } from '../utils/fiscalYear';
 
@@ -19,6 +19,7 @@ export default function Dashboard() {
     importFromJSON,
     customActivityTypes,
     getActivityTypeInfo,
+    setFilters,
   } = useProjects();
 
   const navigate = useNavigate();
@@ -28,7 +29,15 @@ export default function Dashboard() {
 
   const navigateToActivity = (activityId: string) => {
     selectActivity(activityId);
-    navigate(`/projects/activities?activityId=${activityId}`);
+    navigate('/projects/activities');
+  };
+
+  const navigateToCategory = (category: ActivityCategory) => {
+    navigate('/projects/activities');
+    // Use setTimeout to ensure navigation happens first, then filter applies
+    setTimeout(() => {
+      setFilters({ category });
+    }, 0);
   };
   const [showNewActivityMenu, setShowNewActivityMenu] = useState(false);
 
@@ -322,7 +331,7 @@ export default function Dashboard() {
 
       {/* Data Management Panel */}
       {showDataPanel && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-4 border border-gray-200 dark:border-gray-700">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">Backup & Restore</h3>
             <button
@@ -378,7 +387,10 @@ export default function Dashboard() {
 
       {/* Stats cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
+        <div
+          onClick={() => navigateToCategory('trade')}
+          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:border-blue-300 dark:hover:border-blue-600 transition-colors"
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Trade</h3>
             <span className="w-3 h-3 rounded-full bg-blue-500"></span>
@@ -399,7 +411,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
+        <div
+          onClick={() => navigateToCategory('educational')}
+          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:border-green-300 dark:hover:border-green-600 transition-colors"
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Educational</h3>
             <span className="w-3 h-3 rounded-full bg-green-500"></span>
@@ -424,7 +439,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
+        <div
+          onClick={() => navigateToCategory('consultation')}
+          className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600 transition-colors"
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Consultations</h3>
             <span className="w-3 h-3 rounded-full bg-amber-500"></span>
@@ -449,7 +467,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Tasks</h3>
             <span
@@ -470,7 +488,7 @@ export default function Dashboard() {
       {/* Main content grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Upcoming activities */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="px-6 py-4 border-b dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Upcoming Activities</h3>
           </div>
@@ -518,7 +536,7 @@ export default function Dashboard() {
         </div>
 
         {/* Overdue & due soon tasks */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="px-6 py-4 border-b dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Task Reminders</h3>
           </div>

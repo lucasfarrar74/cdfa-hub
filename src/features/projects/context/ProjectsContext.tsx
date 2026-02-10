@@ -62,7 +62,10 @@ type ProjectsAction =
   | { type: 'LOAD_STATE'; payload: Partial<ProjectsState> }
   | { type: 'ADD_CUSTOM_TYPE'; payload: CustomActivityType }
   | { type: 'UPDATE_CUSTOM_TYPE'; payload: { id: string; updates: Partial<CustomActivityType> } }
-  | { type: 'DELETE_CUSTOM_TYPE'; payload: string };
+  | { type: 'DELETE_CUSTOM_TYPE'; payload: string }
+  | { type: 'ADD_PROCEDURE_TEMPLATE'; payload: ProcedureTemplate }
+  | { type: 'UPDATE_PROCEDURE_TEMPLATE'; payload: { id: string; updates: Partial<ProcedureTemplate> } }
+  | { type: 'DELETE_PROCEDURE_TEMPLATE'; payload: string };
 
 // Initial state
 const initialState: ProjectsState = {
@@ -189,6 +192,28 @@ function projectsReducer(state: ProjectsState, action: ProjectsAction): Projects
         customActivityTypes: state.customActivityTypes.filter((t) => t.id !== action.payload),
       };
 
+    case 'ADD_PROCEDURE_TEMPLATE':
+      return {
+        ...state,
+        procedureTemplates: [...state.procedureTemplates, action.payload],
+      };
+
+    case 'UPDATE_PROCEDURE_TEMPLATE':
+      return {
+        ...state,
+        procedureTemplates: state.procedureTemplates.map((t) =>
+          t.id === action.payload.id
+            ? { ...t, ...action.payload.updates, updatedAt: new Date().toISOString() }
+            : t
+        ),
+      };
+
+    case 'DELETE_PROCEDURE_TEMPLATE':
+      return {
+        ...state,
+        procedureTemplates: state.procedureTemplates.filter((t) => t.id !== action.payload),
+      };
+
     default:
       return state;
   }
@@ -236,6 +261,11 @@ interface ProjectsContextType {
   deleteCustomActivityType: (id: string) => void;
   getActivityTypeInfo: (activityType: ActivityType) => ReturnType<typeof getActivityTypeInfo>;
   getAllActivityTypes: () => Array<{ id: string; name: string; category: ActivityCategory }>;
+
+  // Procedure Templates
+  addProcedureTemplate: (template: Omit<ProcedureTemplate, 'id' | 'createdAt' | 'updatedAt'>) => ProcedureTemplate;
+  updateProcedureTemplate: (id: string, updates: Partial<ProcedureTemplate>) => void;
+  deleteProcedureTemplate: (id: string) => void;
 
   // Checklists
   getChecklistForActivity: (activityId: string) => ChecklistInstance | undefined;
@@ -294,12 +324,13 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     const toSave = {
       activities: state.activities,
       checklistInstances: state.checklistInstances,
+      procedureTemplates: state.procedureTemplates,
       staffMembers: state.staffMembers,
       customActivityTypes: state.customActivityTypes,
       currentUserId: state.currentUserId,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-  }, [state.activities, state.checklistInstances, state.staffMembers, state.customActivityTypes, state.currentUserId]);
+  }, [state.activities, state.checklistInstances, state.procedureTemplates, state.staffMembers, state.customActivityTypes, state.currentUserId]);
 
   // Regenerate reminders when activities or checklists change
   useEffect(() => {
@@ -651,6 +682,30 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
     return [...builtInTypes, ...customTypes];
   }, [state.customActivityTypes]);
+
+  // Procedure Template CRUD
+  const addProcedureTemplate = useCallback(
+    (templateData: Omit<ProcedureTemplate, 'id' | 'createdAt' | 'updatedAt'>): ProcedureTemplate => {
+      const now = new Date().toISOString();
+      const template: ProcedureTemplate = {
+        ...templateData,
+        id: `template_${uuidv4().substring(0, 8)}`,
+        createdAt: now,
+        updatedAt: now,
+      };
+      dispatch({ type: 'ADD_PROCEDURE_TEMPLATE', payload: template });
+      return template;
+    },
+    []
+  );
+
+  const updateProcedureTemplate = useCallback((id: string, updates: Partial<ProcedureTemplate>) => {
+    dispatch({ type: 'UPDATE_PROCEDURE_TEMPLATE', payload: { id, updates } });
+  }, []);
+
+  const deleteProcedureTemplate = useCallback((id: string) => {
+    dispatch({ type: 'DELETE_PROCEDURE_TEMPLATE', payload: id });
+  }, []);
 
   // Select activity
   const selectActivity = useCallback((id: string | null) => {
@@ -1023,6 +1078,11 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     deleteCustomActivityType,
     getActivityTypeInfo: getActivityTypeInfoFn,
     getAllActivityTypes,
+
+    // Procedure Templates
+    addProcedureTemplate,
+    updateProcedureTemplate,
+    deleteProcedureTemplate,
 
     // Checklists
     getChecklistForActivity,

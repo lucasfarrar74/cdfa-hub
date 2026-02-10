@@ -1,9 +1,11 @@
 export { default as Dashboard } from './Dashboard';
 export { default as ActivityList } from './ActivityList';
 export { default as ActivityDetail } from './ActivityDetail';
+export { default as ActivityDashboard } from './ActivityDashboard';
 export { default as CalendarView } from './CalendarView';
 export { default as MonthView } from './MonthView';
 export { default as QuarterView } from './QuarterView';
 export { default as YearView } from './YearView';
 export { default as TimelineView } from './TimelineView';
 export { default as ChecklistPanel } from './ChecklistPanel';
+export { default as TemplateEditor } from './TemplateEditor';
