@@ -61,15 +61,15 @@ export function useCrossToolData(activityId: string | null): CrossToolData {
               (a: { id: number | string }) => String(a.id) === String(activityLink!.budgetTrackerActivityId)
             );
             if (budgetActivity) {
-              const allExpenses = budgetData.expenses || {};
-              const expenses: Array<{ amount: number; status: string }> = allExpenses[budgetActivity.id] || [];
+              const allExpenses = budgetData.allExpenses || {};
+              const expenses: Array<{ projected_amount: number | null; actual_amount: number | null; status: string }> = allExpenses[budgetActivity.id] || [];
               const budgetAmount = Number(budgetActivity.budget) || 0;
               const committed = expenses
                 .filter((e: { status: string }) => e.status === 'projected')
-                .reduce((sum: number, e: { amount: number }) => sum + (Number(e.amount) || 0), 0);
+                .reduce((sum: number, e: { projected_amount: number | null }) => sum + (Number(e.projected_amount) || 0), 0);
               const actual = expenses
                 .filter((e: { status: string }) => e.status === 'actual')
-                .reduce((sum: number, e: { amount: number }) => sum + (Number(e.amount) || 0), 0);
+                .reduce((sum: number, e: { actual_amount: number | null }) => sum + (Number(e.actual_amount) || 0), 0);
               const totalSpent = committed + actual;
               const available = budgetAmount - totalSpent;
               const utilizationPercent = budgetAmount > 0 ? Math.round((totalSpent / budgetAmount) * 100) : 0;

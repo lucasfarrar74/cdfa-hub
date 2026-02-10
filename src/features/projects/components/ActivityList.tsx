@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useProjects } from '../context/ProjectsContext';
 import type { ActivityStatus } from '../types';
 import ActivityDashboard from './ActivityDashboard';
+import { useAllCrossToolData } from '../hooks/useAllCrossToolData';
 
 export default function ActivityList() {
   const {
@@ -21,6 +22,7 @@ export default function ActivityList() {
   const [showFilters, setShowFilters] = useState(false);
   const { getActivityTypeInfo } = useProjects();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { dataByActivityId } = useAllCrossToolData();
 
   // Handle activityId URL parameter - open specific activity
   useEffect(() => {
@@ -313,6 +315,7 @@ export default function ActivityList() {
                 <th className="px-4 py-3 hidden md:table-cell">Start Date</th>
                 <th className="px-4 py-3 hidden lg:table-cell">Location</th>
                 <th className="px-4 py-3 hidden lg:table-cell">Checklist</th>
+                <th className="px-4 py-3 hidden lg:table-cell">Linked Tools</th>
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
@@ -389,6 +392,58 @@ export default function ActivityList() {
                       ) : (
                         <span className="text-xs text-gray-400 dark:text-gray-500">N/A</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {(() => {
+                        const crossTool = dataByActivityId.get(activity.id);
+                        if (!crossTool) return <span className="text-sm text-gray-400 dark:text-gray-500">—</span>;
+
+                        const hasBudget = !!crossTool.budget;
+                        const hasScheduler = !!crossTool.scheduler;
+
+                        if (!hasBudget && !hasScheduler) {
+                          return <span className="text-sm text-gray-400 dark:text-gray-500">—</span>;
+                        }
+
+                        return (
+                          <div className="space-y-1">
+                            {hasBudget && (
+                              <div className="flex items-center gap-2" title={`Budget: $${crossTool.budget!.budgetAmount.toLocaleString()} | Used: ${crossTool.budget!.utilizationPercent}%`}>
+                                <div className="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                                  <div
+                                    className={`h-1.5 rounded-full transition-all ${
+                                      crossTool.budget!.utilizationPercent > 100
+                                        ? 'bg-red-500'
+                                        : crossTool.budget!.utilizationPercent > 80
+                                        ? 'bg-yellow-500'
+                                        : 'bg-blue-500'
+                                    }`}
+                                    style={{ width: `${Math.min(crossTool.budget!.utilizationPercent, 100)}%` }}
+                                  />
+                                </div>
+                                <span className={`text-xs ${
+                                  crossTool.budget!.utilizationPercent > 100
+                                    ? 'text-red-600 dark:text-red-400'
+                                    : crossTool.budget!.utilizationPercent > 80
+                                    ? 'text-yellow-600 dark:text-yellow-400'
+                                    : 'text-gray-500 dark:text-gray-400'
+                                }`}>
+                                  {crossTool.budget!.utilizationPercent}%
+                                </span>
+                              </div>
+                            )}
+                            {hasScheduler && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                <span title="Meetings">{crossTool.scheduler!.meetingCount}M</span>
+                                <span className="text-gray-300 dark:text-gray-600">|</span>
+                                <span title="Suppliers">{crossTool.scheduler!.supplierCount}S</span>
+                                <span className="text-gray-300 dark:text-gray-600">|</span>
+                                <span title="Buyers">{crossTool.scheduler!.buyerCount}B</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
