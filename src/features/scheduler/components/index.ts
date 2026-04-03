@@ -10,6 +10,7 @@ export { default as KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 export { default as MobileScheduleView } from './MobileScheduleView';
 export { default as NotificationSettings } from './NotificationSettings';
 export { default as ParticipantsPanel } from './ParticipantsPanel';
+export { default as PreferenceFormPanel } from './PreferenceFormPanel';
 export { default as PreferencesPanel } from './PreferencesPanel';
 export { default as ProjectSidebar } from './ProjectSidebar';
 export { default as SchedulePanel } from './SchedulePanel';

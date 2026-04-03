@@ -7,6 +7,23 @@ interface ScheduleResult {
   unscheduledPairs: Array<{ supplierId: string; buyerId: string }>;
 }
 
+/**
+ * Check if a time slot falls within a supplier's available time window.
+ * Returns true if the supplier has no time restrictions or the slot is within bounds.
+ */
+function isSlotInSupplierWindow(slot: TimeSlot, supplier: Supplier): boolean {
+  if (!supplier.availableFrom && !supplier.availableTo) return true;
+
+  // Compare using HH:mm strings against the slot's start time
+  const slotStart = slot.startTime instanceof Date ? slot.startTime : new Date(slot.startTime);
+  const slotHHMM = slotStart.toTimeString().substring(0, 5); // "HH:MM"
+
+  if (supplier.availableFrom && slotHHMM < supplier.availableFrom) return false;
+  if (supplier.availableTo && slotHHMM >= supplier.availableTo) return false;
+
+  return true;
+}
+
 export function canSupplierMeetBuyer(supplier: Supplier, buyerId: string): boolean {
   switch (supplier.preference) {
     case 'all':
@@ -83,10 +100,18 @@ function generateEfficientSchedule(
     const supplierUsed = supplierSlots.get(desired.supplierId)!;
     const buyerUsed = buyerSlots.get(desired.buyerId)!;
 
-    // Find first available slot where both are free
-    const availableSlot = meetingSlots.find(slot =>
-      !supplierUsed.has(slot.id) && !buyerUsed.has(slot.id)
-    );
+    // Find first available slot where both are free and supplier is available on that day
+    const supplier = suppliers.find(s => s.id === desired.supplierId);
+    const supplierDays = supplier?.selectedDays;
+
+    const availableSlot = meetingSlots.find(slot => {
+      if (supplierUsed.has(slot.id) || buyerUsed.has(slot.id)) return false;
+      // If supplier has day restrictions, only allow slots on those days
+      if (supplierDays && supplierDays.length > 0 && !supplierDays.includes(slot.date)) return false;
+      // Check supplier's available time window
+      if (supplier && !isSlotInSupplierWindow(slot, supplier)) return false;
+      return true;
+    });
 
     if (availableSlot) {
       meetings.push({
@@ -124,7 +149,6 @@ function generateSpacedSchedule(
 
   // Get all dates in the event
   const dates = getDateRange(config.startDate, config.endDate);
-  const numDays = dates.length;
 
   // Get non-break slots grouped by date
   const slotsByDate: Map<string, TimeSlot[]> = new Map();
@@ -162,18 +186,26 @@ function generateSpacedSchedule(
     const buyerUsed = buyerSlots.get(desired.buyerId)!;
     const supplierDayCount = supplierMeetingsPerDay.get(desired.supplierId)!;
 
-    const totalForSupplier = supplierTotalMeetings.get(desired.supplierId)!;
-    const targetPerDay = Math.ceil(totalForSupplier / numDays);
+    // If supplier has day restrictions, only consider those days
+    const supplier = suppliers.find(s => s.id === desired.supplierId);
+    const supplierDays = supplier?.selectedDays;
+    const allowedDates = (supplierDays && supplierDays.length > 0)
+      ? dates.filter(d => supplierDays.includes(d))
+      : dates;
 
     // Find the day with fewest meetings for this supplier that has available slots
     let bestSlot: TimeSlot | null = null;
     let bestDayCount = Infinity;
 
-    for (const date of dates) {
+    const effectiveNumDays = allowedDates.length || 1;
+    const totalForSupplierSpaced = supplierTotalMeetings.get(desired.supplierId)!;
+    const effectiveTargetPerDay = Math.ceil(totalForSupplierSpaced / effectiveNumDays);
+
+    for (const date of allowedDates) {
       const currentDayCount = supplierDayCount.get(date)!;
 
       // Skip this day if it's already at or above target (unless no better option)
-      if (currentDayCount >= targetPerDay && bestSlot !== null) {
+      if (currentDayCount >= effectiveTargetPerDay && bestSlot !== null) {
         continue;
       }
 
@@ -182,6 +214,7 @@ function generateSpacedSchedule(
       // Find first available slot on this day
       const availableSlot = daySlots.find(slot =>
         !supplierUsed.has(slot.id) && !buyerUsed.has(slot.id)
+        && (supplier ? isSlotInSupplierWindow(slot, supplier) : true)
       );
 
       if (availableSlot && currentDayCount < bestDayCount) {

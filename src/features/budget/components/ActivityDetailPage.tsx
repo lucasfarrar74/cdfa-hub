@@ -1,9 +1,11 @@
 import { useState, useMemo, Fragment } from 'react';
 import { useBudget } from '../context/BudgetContext';
-import type { ActivitySummary, Expense, Income, ActivityFinancials, Participant } from '../types';
+import type { ActivitySummary, Expense, Income, ActivityFinancials, Participant, CategoryBudget } from '../types';
 import ExpenseForm from './ExpenseForm';
 import IncomeForm from './IncomeForm';
 import ActivityForm from './ActivityForm';
+import CategoryExpenseList from './CategoryExpenseList';
+import CategoryBudgetEditor from './CategoryBudgetEditor';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -55,9 +57,10 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
     duplicateExpense, deleteIncome, markIncomeReceived, createExpense,
     computeActivityFinancials, createParticipant, updateParticipant,
     archiveParticipant, unarchiveParticipant, deleteParticipant,
+    setCategoryBudget, deleteCategoryBudget, getCategoryBudgets,
   } = useBudget();
 
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+  const [activeTab, setActiveTab] = useState<DetailTab>('expenses');
   const [showEditForm, setShowEditForm] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -70,6 +73,9 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
   const [bulkRows, setBulkRows] = useState<Array<{ categoryId: string; description: string; amount: string; date: string }>>([
     { categoryId: '', description: '', amount: '', date: '' },
   ]);
+  const [expenseViewMode, setExpenseViewMode] = useState<'category' | 'list'>('category');
+  const [editingAllocation, setEditingAllocation] = useState<{ categoryId: number; currentAmount: number | null } | null>(null);
+  const [defaultCategoryId, setDefaultCategoryId] = useState<number | undefined>(undefined);
 
   const activity = activities.find(a => a.id === activityId);
   const expenses = allExpenses[activityId] || [];
@@ -100,6 +106,8 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
     }
     return Array.from(map.entries()).sort((a, b) => (b[1].actual + b[1].projected) - (a[1].actual + a[1].projected));
   }, [expenses]);
+
+  const activityCategoryBudgets = getCategoryBudgets(activityId);
 
   const sortedExpenses = useMemo(() => {
     const sorted = [...expenses];
@@ -152,13 +160,11 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
     setBulkRows([{ categoryId: '', description: '', amount: '', date: '' }]);
   };
 
-  const confirmedCount = expenses.filter(e => e.status === 'actual').length;
-  const pendingCount = expenses.filter(e => e.status === 'projected').length;
   const uniqueCategories = new Set(expenses.map(e => e.category_id)).size;
 
   const tabs: { id: DetailTab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'expenses', label: `Expenses (${expenses.length})` },
+    { id: 'expenses', label: `Budget (${expenses.length})` },
+    { id: 'overview', label: 'Details' },
     { id: 'income', label: `Income (${income.length})` },
     { id: 'participants', label: `Participants (${activityParticipants.length})` },
   ];
@@ -237,31 +243,135 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
             financials={financials}
             cooperator={cooperator}
             expenses={expenses}
-            confirmedCount={confirmedCount}
-            pendingCount={pendingCount}
             uniqueCategories={uniqueCategories}
             categoryBreakdown={categoryBreakdown}
+            categoryBudgets={activityCategoryBudgets}
             expandedCategory={expandedCategory}
             setExpandedCategory={setExpandedCategory}
           />
         )}
 
         {activeTab === 'expenses' && (
-          <ExpensesTab
-            expenses={sortedExpenses}
-            expenseSort={expenseSort}
-            setExpenseSort={setExpenseSort}
-            onAddExpense={() => { setEditingExpense(null); setShowExpenseForm(true); }}
-            onEditExpense={(e) => { setEditingExpense(e); setShowExpenseForm(true); }}
-            onDeleteExpense={(id) => deleteExpense(activityId, id)}
-            onConvertExpense={(id) => convertExpenseToActual(activityId, id)}
-            onDuplicateExpense={(id) => duplicateExpense(activityId, id)}
-            showBulkAdd={showBulkAdd}
-            setShowBulkAdd={setShowBulkAdd}
-            bulkRows={bulkRows}
-            setBulkRows={setBulkRows}
-            onBulkSubmit={handleBulkSubmit}
-            categories={categories}
+          <div className="space-y-4">
+            {/* Budget summary bar + stacked category chart */}
+            <BudgetSummaryBar
+              activity={activity}
+              financials={financials}
+              categoryBreakdown={categoryBreakdown}
+              categories={categories}
+            />
+
+            {/* Toolbar */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setExpenseViewMode('category')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      expenseViewMode === 'category'
+                        ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    By Category
+                  </button>
+                  <button
+                    onClick={() => setExpenseViewMode('list')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      expenseViewMode === 'list'
+                        ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    List
+                  </button>
+                </div>
+                {expenseViewMode === 'list' && (
+                  <select
+                    value={expenseSort}
+                    onChange={e => setExpenseSort(e.target.value as 'date' | 'category' | 'amount' | 'status')}
+                    className="text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="date">Sort: Date</option>
+                    <option value="category">Sort: Category</option>
+                    <option value="amount">Sort: Amount</option>
+                    <option value="status">Sort: Status</option>
+                  </select>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowBulkAdd(!showBulkAdd)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  Bulk Add
+                </button>
+                <button
+                  onClick={() => { setDefaultCategoryId(undefined); setEditingExpense(null); setShowExpenseForm(true); }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                >
+                  + Add Expense
+                </button>
+              </div>
+            </div>
+
+            {/* Bulk Add Form */}
+            {showBulkAdd && (
+              <BulkAddForm
+                bulkRows={bulkRows}
+                setBulkRows={setBulkRows}
+                onBulkSubmit={handleBulkSubmit}
+                onClose={() => setShowBulkAdd(false)}
+                categories={categories}
+              />
+            )}
+
+            {/* Category view or List view */}
+            {expenseViewMode === 'category' ? (
+              <CategoryExpenseList
+                expenses={expenses}
+                categories={categories}
+                categoryBudgets={activityCategoryBudgets}
+                activityBudget={activity.budget}
+                onEditExpense={(e) => { setEditingExpense(e); setShowExpenseForm(true); }}
+                onDeleteExpense={(id) => deleteExpense(activityId, id)}
+                onConvertExpense={(id) => convertExpenseToActual(activityId, id)}
+                onDuplicateExpense={(id) => duplicateExpense(activityId, id)}
+                onAddExpense={(catId) => { setDefaultCategoryId(catId); setEditingExpense(null); setShowExpenseForm(true); }}
+                onEditAllocation={(catId, amt) => setEditingAllocation({ categoryId: catId, currentAmount: amt })}
+              />
+            ) : (
+              <ExpensesTab
+                expenses={sortedExpenses}
+                onEditExpense={(e) => { setEditingExpense(e); setShowExpenseForm(true); }}
+                onDeleteExpense={(id) => deleteExpense(activityId, id)}
+                onConvertExpense={(id) => convertExpenseToActual(activityId, id)}
+                onDuplicateExpense={(id) => duplicateExpense(activityId, id)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Category Budget Allocation Editor Modal */}
+        {editingAllocation && activity && (
+          <CategoryBudgetEditor
+            categoryName={categories.find(c => c.id === editingAllocation.categoryId)?.name || 'Unknown'}
+            currentAmount={editingAllocation.currentAmount}
+            activityBudget={activity.budget}
+            totalAllocatedOther={
+              activityCategoryBudgets
+                .filter(cb => cb.category_id !== editingAllocation.categoryId)
+                .reduce((s, cb) => s + cb.allocated_amount, 0)
+            }
+            onSave={(amount) => {
+              setCategoryBudget(activityId, editingAllocation.categoryId, amount);
+              setEditingAllocation(null);
+            }}
+            onDelete={() => {
+              deleteCategoryBudget(activityId, editingAllocation.categoryId);
+              setEditingAllocation(null);
+            }}
+            onClose={() => setEditingAllocation(null)}
           />
         )}
 
@@ -297,7 +407,8 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
         <ExpenseForm
           activityId={activityId}
           expense={editingExpense}
-          onClose={() => { setShowExpenseForm(false); setEditingExpense(null); }}
+          defaultCategoryId={editingExpense ? undefined : defaultCategoryId}
+          onClose={() => { setShowExpenseForm(false); setEditingExpense(null); setDefaultCategoryId(undefined); }}
         />
       )}
       {showIncomeForm && (
@@ -333,20 +444,21 @@ export default function ActivityDetailPage({ activityId, onBack }: ActivityDetai
 
 function OverviewTab({
   activity, financials, cooperator, expenses,
-  confirmedCount, pendingCount, uniqueCategories,
-  categoryBreakdown, expandedCategory, setExpandedCategory,
+  uniqueCategories,
+  categoryBreakdown, categoryBudgets, expandedCategory, setExpandedCategory,
 }: {
   activity: ActivitySummary;
   financials: ActivityFinancials;
   cooperator: { name: string; full_name: string | null; contact_name?: string; email?: string } | undefined;
   expenses: Expense[];
-  confirmedCount: number;
-  pendingCount: number;
   uniqueCategories: number;
   categoryBreakdown: [number, { name: string; count: number; projected: number; actual: number; expenses: Expense[] }][];
+  categoryBudgets: CategoryBudget[];
   expandedCategory: number | null;
   setExpandedCategory: (id: number | null) => void;
 }) {
+  const totalAllocated = categoryBudgets.reduce((s, cb) => s + cb.allocated_amount, 0);
+  const hasAllocations = categoryBudgets.length > 0;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* Left Column */}
@@ -355,10 +467,10 @@ function OverviewTab({
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
           <div className="grid grid-cols-5 gap-3">
             {[
-              { label: 'Total', value: expenses.length },
-              { label: 'Confirmed', value: confirmedCount },
-              { label: 'Pending', value: pendingCount },
+              { label: 'Expenses', value: expenses.length },
               { label: 'Categories', value: uniqueCategories },
+              { label: hasAllocations ? 'Allocated' : 'Committed', value: hasAllocations ? formatCurrency(totalAllocated) : formatCurrency(financials.total_committed) },
+              { label: 'Available', value: formatCurrency(financials.net_available_budget) },
               { label: 'Utilization', value: `${financials.committed_percent}%` },
             ].map(s => (
               <div key={s.label} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
@@ -453,8 +565,6 @@ function OverviewTab({
         {/* Category Breakdown */}
         {categoryBreakdown.length > 0 && (() => {
           const totalCommitted = categoryBreakdown.reduce((s, [, c]) => s + c.actual + c.projected, 0);
-          const totalActual = categoryBreakdown.reduce((s, [, c]) => s + c.actual, 0);
-          const totalProjected = categoryBreakdown.reduce((s, [, c]) => s + c.projected, 0);
           const totalExpenses = categoryBreakdown.reduce((s, [, c]) => s + c.count, 0);
           const availableBudget = Math.max(0, activity.budget - totalCommitted);
           const availablePct = activity.budget > 0 ? (availableBudget / activity.budget) * 100 : 0;
@@ -513,14 +623,26 @@ function OverviewTab({
 
               {/* Category Table */}
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
+                  <colgroup>
+                    <col />
+                    <col style={{ width: '60px' }} />
+                    {hasAllocations && <col style={{ width: '100px' }} />}
+                    <col style={{ width: '100px' }} />
+                    {hasAllocations && <col style={{ width: '100px' }} />}
+                    <col style={{ width: '80px' }} />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-gray-200 dark:border-gray-600">
                       <th className="py-2 pr-2 text-left font-medium text-gray-700 dark:text-gray-300">Category</th>
-                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Expenses</th>
-                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Actual</th>
-                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Projected</th>
+                      <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Items</th>
+                      {hasAllocations && (
+                        <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Allocated</th>
+                      )}
                       <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Committed</th>
+                      {hasAllocations && (
+                        <th className="py-2 px-2 text-right font-medium text-gray-700 dark:text-gray-300">Remaining</th>
+                      )}
                       <th className="py-2 pl-2 text-right font-medium text-gray-700 dark:text-gray-300">% of Budget</th>
                     </tr>
                   </thead>
@@ -529,6 +651,9 @@ function OverviewTab({
                       const committed = cat.actual + cat.projected;
                       const pct = activity.budget > 0 ? (committed / activity.budget) * 100 : 0;
                       const isExpanded = expandedCategory === catId;
+                      const allocation = categoryBudgets.find(cb => cb.category_id === catId);
+                      const remaining = allocation ? allocation.allocated_amount - committed : null;
+                      const colCount = hasAllocations ? 6 : 4;
 
                       return (
                         <Fragment key={catId}>
@@ -552,25 +677,34 @@ function OverviewTab({
                               </div>
                             </td>
                             <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{cat.count}</td>
-                            <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{formatCurrency(cat.actual)}</td>
-                            <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">{formatCurrency(cat.projected)}</td>
+                            {hasAllocations && (
+                              <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">
+                                {allocation ? formatCurrency(allocation.allocated_amount) : '-'}
+                              </td>
+                            )}
                             <td className="py-2 px-2 text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(committed)}</td>
+                            {hasAllocations && (
+                              <td className={`py-2 px-2 text-right ${
+                                remaining !== null && remaining < 0
+                                  ? 'text-red-600 dark:text-red-400 font-medium'
+                                  : 'text-gray-600 dark:text-gray-400'
+                              }`}>
+                                {remaining !== null ? formatCurrency(remaining) : '-'}
+                              </td>
+                            )}
                             <td className="py-2 pl-2 text-right text-gray-600 dark:text-gray-400">{pct.toFixed(1)}%</td>
                           </tr>
 
                           {/* Expanded expenses */}
                           {isExpanded && cat.expenses.map(e => (
                             <tr key={e.id} className="bg-gray-50 dark:bg-gray-700/30">
-                              <td colSpan={4} className="py-1.5 pl-10 pr-2">
+                              <td colSpan={colCount - 1} className="py-1.5 pl-10 pr-2">
                                 <span className="text-xs text-gray-700 dark:text-gray-300">{e.description}</span>
                               </td>
-                              <td className="py-1.5 px-2 text-right">
+                              <td className="py-1.5 pl-2 text-right">
                                 <span className={`text-xs ${e.actual_amount ? 'text-green-600 dark:text-green-400 font-medium' : 'text-gray-600 dark:text-gray-400'}`}>
                                   {formatCurrency(e.actual_amount ?? e.projected_amount ?? 0)}
                                 </span>
-                              </td>
-                              <td className="py-1.5 pl-2 text-right">
-                                <StatusBadge status={e.status} />
                               </td>
                             </tr>
                           ))}
@@ -582,9 +716,15 @@ function OverviewTab({
                     <tr className="border-t-2 border-gray-300 dark:border-gray-500 font-semibold">
                       <td className="py-2 pr-2 text-left text-gray-900 dark:text-gray-100">Total</td>
                       <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{totalExpenses}</td>
-                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalActual)}</td>
-                      <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalProjected)}</td>
+                      {hasAllocations && (
+                        <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalAllocated)}</td>
+                      )}
                       <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(totalCommitted)}</td>
+                      {hasAllocations && (
+                        <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">
+                          {formatCurrency(totalAllocated - totalCommitted)}
+                        </td>
+                      )}
                       <td className="py-2 pl-2 text-right text-gray-900 dark:text-gray-100">
                         {activity.budget > 0 ? ((totalCommitted / activity.budget) * 100).toFixed(1) : '0.0'}%
                       </td>
@@ -603,206 +743,265 @@ function OverviewTab({
 // --- Expenses Sub-tab (full table layout) ---
 
 function ExpensesTab({
-  expenses, expenseSort, setExpenseSort,
-  onAddExpense, onEditExpense, onDeleteExpense, onConvertExpense, onDuplicateExpense,
-  showBulkAdd, setShowBulkAdd, bulkRows, setBulkRows, onBulkSubmit, categories,
+  expenses, onEditExpense, onDeleteExpense, onConvertExpense, onDuplicateExpense,
 }: {
   expenses: Expense[];
-  expenseSort: string;
-  setExpenseSort: (s: 'date' | 'category' | 'amount' | 'status') => void;
-  onAddExpense: () => void;
   onEditExpense: (e: Expense) => void;
   onDeleteExpense: (id: number) => void;
   onConvertExpense: (id: number) => void;
   onDuplicateExpense: (id: number) => void;
-  showBulkAdd: boolean;
-  setShowBulkAdd: (v: boolean) => void;
+}) {
+  if (expenses.length === 0) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center text-gray-500 dark:text-gray-400">
+        No expenses yet. Click "+ Add Expense" to get started.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full table-fixed">
+          <colgroup>
+            <col />
+            <col style={{ width: '130px' }} />
+            <col style={{ width: '100px' }} />
+            <col style={{ width: '100px' }} />
+            <col style={{ width: '90px' }} />
+            <col style={{ width: '160px' }} />
+          </colgroup>
+          <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Description</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Category</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Projected</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Actual</th>
+              <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {expenses.map(expense => (
+              <tr key={expense.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <td className="px-4 py-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{expense.description}</p>
+                  {expense.notes && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{expense.notes}</p>}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{expense.category_name}</td>
+                <td className="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-400">
+                  {expense.projected_amount != null ? formatCurrency(expense.projected_amount) : '-'}
+                </td>
+                <td className="px-4 py-3 text-right text-sm font-medium text-green-600 dark:text-green-400">
+                  {expense.actual_amount != null ? formatCurrency(expense.actual_amount) : '-'}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <StatusBadge status={expense.status} />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    {expense.status === 'projected' && (
+                      <button
+                        onClick={() => onConvertExpense(expense.id)}
+                        className="px-2 py-0.5 text-xs text-green-600 hover:text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors"
+                      >
+                        Confirm
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onDuplicateExpense(expense.id)}
+                      className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => onEditExpense(expense)}
+                      className="px-2 py-0.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => onDeleteExpense(expense.id)}
+                      className="px-2 py-0.5 text-xs text-red-500 hover:text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                    >
+                      Del
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BudgetSummaryBar({
+  activity, financials, categoryBreakdown, categories,
+}: {
+  activity: ActivitySummary;
+  financials: ActivityFinancials;
+  categoryBreakdown: [number, { name: string; count: number; projected: number; actual: number; expenses: Expense[] }][];
+  categories: { id: number; name: string }[];
+}) {
+  const totalCommitted = categoryBreakdown.reduce((s, [, c]) => s + c.actual + c.projected, 0);
+  const availableBudget = Math.max(0, activity.budget - totalCommitted);
+  const availablePct = activity.budget > 0 ? (availableBudget / activity.budget) * 100 : 0;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      {/* Summary numbers */}
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="flex items-baseline gap-4">
+          <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCurrency(totalCommitted)}</span>
+          <span className="text-sm text-gray-500 dark:text-gray-400">of {formatCurrency(activity.budget)} budget</span>
+        </div>
+        <span className={`text-sm font-semibold ${
+          financials.net_available_budget < 0
+            ? 'text-red-600 dark:text-red-400'
+            : financials.committed_percent >= 85
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-green-600 dark:text-green-400'
+        }`}>
+          {formatCurrency(financials.net_available_budget)} available
+        </span>
+      </div>
+
+      {/* Stacked category bar */}
+      {categoryBreakdown.length > 0 && (
+        <>
+          <div className="h-8 bg-gray-200 dark:bg-gray-600 rounded-lg overflow-hidden flex">
+            {categoryBreakdown.map(([catId, cat], i) => {
+              const total = cat.actual + cat.projected;
+              const pct = activity.budget > 0 ? (total / activity.budget) * 100 : 0;
+              const colorIdx = categories.findIndex(c => c.id === catId);
+              const color = CATEGORY_COLORS[colorIdx >= 0 ? colorIdx % CATEGORY_COLORS.length : i % CATEGORY_COLORS.length];
+              return (
+                <div
+                  key={catId}
+                  className="h-full flex items-center justify-center overflow-hidden transition-all"
+                  style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: color }}
+                  title={`${cat.name}: ${formatCurrency(total)}`}
+                >
+                  {pct > 8 && (
+                    <span className="text-white text-xs font-medium truncate px-1">{cat.name}</span>
+                  )}
+                </div>
+              );
+            })}
+            {availablePct > 0 && (
+              <div
+                className="h-full flex items-center justify-center overflow-hidden bg-gray-400/30 dark:bg-gray-500/30"
+                style={{ width: `${availablePct}%` }}
+                title={`Available: ${formatCurrency(availableBudget)}`}
+              />
+            )}
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+            {categoryBreakdown.map(([catId, cat], i) => {
+              const total = cat.actual + cat.projected;
+              const colorIdx = categories.findIndex(c => c.id === catId);
+              const color = CATEGORY_COLORS[colorIdx >= 0 ? colorIdx % CATEGORY_COLORS.length : i % CATEGORY_COLORS.length];
+              return (
+                <div key={catId} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                  <span className="text-xs text-gray-600 dark:text-gray-400">{cat.name}</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">{formatCurrency(total)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BulkAddForm({
+  bulkRows, setBulkRows, onBulkSubmit, onClose, categories,
+}: {
   bulkRows: Array<{ categoryId: string; description: string; amount: string; date: string }>;
   setBulkRows: (rows: Array<{ categoryId: string; description: string; amount: string; date: string }>) => void;
   onBulkSubmit: () => void;
+  onClose: () => void;
   categories: { id: number; name: string }[];
 }) {
   const inputCls = 'w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-500 dark:text-gray-400">Sort:</label>
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Bulk Add Expenses</h4>
+      {bulkRows.map((row, i) => (
+        <div key={i} className="grid grid-cols-12 gap-2">
           <select
-            value={expenseSort}
-            onChange={e => setExpenseSort(e.target.value as 'date' | 'category' | 'amount' | 'status')}
-            className="text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            value={row.categoryId}
+            onChange={e => {
+              const newRows = [...bulkRows];
+              newRows[i] = { ...row, categoryId: e.target.value };
+              setBulkRows(newRows);
+            }}
+            className={`col-span-3 ${inputCls}`}
           >
-            <option value="date">Date</option>
-            <option value="category">Category</option>
-            <option value="amount">Amount</option>
-            <option value="status">Status</option>
+            <option value="">Category</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-        </div>
-        <div className="flex gap-2">
+          <input
+            value={row.description}
+            onChange={e => {
+              const newRows = [...bulkRows];
+              newRows[i] = { ...row, description: e.target.value };
+              setBulkRows(newRows);
+            }}
+            placeholder="Description"
+            className={`col-span-4 ${inputCls}`}
+          />
+          <input
+            value={row.amount}
+            onChange={e => {
+              const newRows = [...bulkRows];
+              newRows[i] = { ...row, amount: e.target.value };
+              setBulkRows(newRows);
+            }}
+            placeholder="$0"
+            className={`col-span-2 ${inputCls}`}
+          />
+          <input
+            type="date"
+            value={row.date}
+            onChange={e => {
+              const newRows = [...bulkRows];
+              newRows[i] = { ...row, date: e.target.value };
+              setBulkRows(newRows);
+            }}
+            className={`col-span-2 ${inputCls}`}
+          />
           <button
-            onClick={() => setShowBulkAdd(!showBulkAdd)}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+            onClick={() => setBulkRows(bulkRows.filter((_, j) => j !== i))}
+            className="col-span-1 text-gray-400 hover:text-red-500 text-sm"
           >
-            Bulk Add
+            x
           </button>
-          <button
-            onClick={onAddExpense}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-          >
-            + Add Expense
+        </div>
+      ))}
+      <div className="flex justify-between">
+        <button
+          onClick={() => setBulkRows([...bulkRows, { categoryId: '', description: '', amount: '', date: '' }])}
+          className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+        >
+          + Add Row
+        </button>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">
+            Cancel
+          </button>
+          <button onClick={onBulkSubmit} className="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+            Add All
           </button>
         </div>
       </div>
-
-      {/* Bulk Add Form */}
-      {showBulkAdd && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Bulk Add Expenses</h4>
-          {bulkRows.map((row, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2">
-              <select
-                value={row.categoryId}
-                onChange={e => {
-                  const newRows = [...bulkRows];
-                  newRows[i] = { ...row, categoryId: e.target.value };
-                  setBulkRows(newRows);
-                }}
-                className={`col-span-3 ${inputCls}`}
-              >
-                <option value="">Category</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <input
-                value={row.description}
-                onChange={e => {
-                  const newRows = [...bulkRows];
-                  newRows[i] = { ...row, description: e.target.value };
-                  setBulkRows(newRows);
-                }}
-                placeholder="Description"
-                className={`col-span-4 ${inputCls}`}
-              />
-              <input
-                value={row.amount}
-                onChange={e => {
-                  const newRows = [...bulkRows];
-                  newRows[i] = { ...row, amount: e.target.value };
-                  setBulkRows(newRows);
-                }}
-                placeholder="$0"
-                className={`col-span-2 ${inputCls}`}
-              />
-              <input
-                type="date"
-                value={row.date}
-                onChange={e => {
-                  const newRows = [...bulkRows];
-                  newRows[i] = { ...row, date: e.target.value };
-                  setBulkRows(newRows);
-                }}
-                className={`col-span-2 ${inputCls}`}
-              />
-              <button
-                onClick={() => setBulkRows(bulkRows.filter((_, j) => j !== i))}
-                className="col-span-1 text-gray-400 hover:text-red-500 text-sm"
-              >
-                x
-              </button>
-            </div>
-          ))}
-          <div className="flex justify-between">
-            <button
-              onClick={() => setBulkRows([...bulkRows, { categoryId: '', description: '', amount: '', date: '' }])}
-              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-            >
-              + Add Row
-            </button>
-            <div className="flex gap-2">
-              <button onClick={() => setShowBulkAdd(false)} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">
-                Cancel
-              </button>
-              <button onClick={onBulkSubmit} className="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                Add All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {expenses.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 text-center text-gray-500 dark:text-gray-400">
-          No expenses yet. Click "Add Expense" to get started.
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Description</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Category</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Projected</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Actual</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 dark:text-gray-300">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {expenses.map(expense => (
-                  <tr key={expense.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{expense.description}</p>
-                      {expense.notes && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{expense.notes}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{expense.category_name}</td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-400">
-                      {expense.projected_amount != null ? formatCurrency(expense.projected_amount) : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm font-medium text-green-600 dark:text-green-400">
-                      {expense.actual_amount != null ? formatCurrency(expense.actual_amount) : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <StatusBadge status={expense.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1">
-                        {expense.status === 'projected' && (
-                          <button
-                            onClick={() => onConvertExpense(expense.id)}
-                            className="px-2 py-0.5 text-xs text-green-600 hover:text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors"
-                          >
-                            Confirm
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onDuplicateExpense(expense.id)}
-                          className="px-2 py-0.5 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
-                        >
-                          Copy
-                        </button>
-                        <button
-                          onClick={() => onEditExpense(expense)}
-                          className="px-2 py-0.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => onDeleteExpense(expense.id)}
-                          className="px-2 py-0.5 text-xs text-red-500 hover:text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
-                        >
-                          Del
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -5,6 +5,14 @@ export interface ContactPerson {
   title?: string;
 }
 
+export interface AvailabilityRestriction {
+  type: 'unavailable_date' | 'unavailable_slot' | 'preferred_time' | 'note';
+  date?: string;       // YYYY-MM-DD
+  startTime?: string;  // HH:mm
+  endTime?: string;    // HH:mm
+  note?: string;
+}
+
 export interface Supplier {
   id: string;
   companyName: string;           // PRIMARY FIELD (required)
@@ -14,6 +22,11 @@ export interface Supplier {
   meetingDuration: number; // in minutes
   preference: PreferenceType;
   preferenceList: string[]; // buyer IDs
+  availabilityRestrictions?: AvailabilityRestriction[];
+  selectedDays?: string[]; // YYYY-MM-DD dates the supplier is available for meetings
+  availableFrom?: string;  // HH:mm — earliest time this supplier can meet (e.g. "09:00")
+  availableTo?: string;    // HH:mm — latest time this supplier can meet (e.g. "14:00")
+
 }
 
 export interface Buyer {

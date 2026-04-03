@@ -5,6 +5,7 @@ import {
   EventConfigPanel,
   ParticipantsPanel,
   PreferencesPanel,
+  PreferenceFormPanel,
   SchedulePanel,
   ExportPanel,
   ProjectSidebar,
@@ -14,7 +15,7 @@ import {
   ThemeToggle,
 } from '../features/scheduler/components';
 
-type Tab = 'config' | 'participants' | 'preferences' | 'schedule' | 'export';
+type Tab = 'config' | 'participants' | 'preferences' | 'forms' | 'schedule' | 'export';
 
 function SchedulerContent() {
   const [activeTab, setActiveTab] = useState<Tab>('config');
@@ -68,6 +69,7 @@ function SchedulerContent() {
     { id: 'config', label: 'Event Setup' },
     { id: 'participants', label: 'Participants' },
     { id: 'preferences', label: 'Preferences' },
+    { id: 'forms', label: 'Preference Forms' },
     { id: 'schedule', label: 'Schedule' },
     { id: 'export', label: 'Export' },
   ];
@@ -142,6 +144,7 @@ function SchedulerContent() {
           {activeTab === 'config' && <EventConfigPanel />}
           {activeTab === 'participants' && <ParticipantsPanel />}
           {activeTab === 'preferences' && <PreferencesPanel />}
+          {activeTab === 'forms' && <PreferenceFormPanel />}
           {activeTab === 'schedule' && <SchedulePanel />}
           {activeTab === 'export' && <ExportPanel />}
         </main>

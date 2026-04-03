@@ -5,6 +5,7 @@ import type { Expense, CreateExpenseInput } from '../types';
 interface ExpenseFormProps {
   activityId: number;
   expense?: Expense | null;
+  defaultCategoryId?: number;
   onClose: () => void;
   onSaved?: () => void;
 }
@@ -14,11 +15,11 @@ function parseCurrency(value: string): number | undefined {
   return isNaN(n) || value.trim() === '' ? undefined : n;
 }
 
-export default function ExpenseForm({ activityId, expense, onClose, onSaved }: ExpenseFormProps) {
+export default function ExpenseForm({ activityId, expense, defaultCategoryId, onClose, onSaved }: ExpenseFormProps) {
   const { categories, templates, participants, createExpense, updateExpense } = useBudget();
   const isEdit = !!expense;
 
-  const [categoryId, setCategoryId] = useState<number | ''>(expense?.category_id || '');
+  const [categoryId, setCategoryId] = useState<number | ''>(expense?.category_id || defaultCategoryId || '');
   const [description, setDescription] = useState(expense?.description || '');
   const [projectedAmount, setProjectedAmount] = useState(expense?.projected_amount?.toString() || '');
   const [projectedDate, setProjectedDate] = useState(expense?.projected_date || '');

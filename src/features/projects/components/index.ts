@@ -9,3 +9,5 @@ export { default as YearView } from './YearView';
 export { default as TimelineView } from './TimelineView';
 export { default as ChecklistPanel } from './ChecklistPanel';
 export { default as TemplateEditor } from './TemplateEditor';
+export { default as StaffDirectory } from './StaffDirectory';
+export { default as TeamDashboard } from './TeamDashboard';

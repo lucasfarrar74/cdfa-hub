@@ -1,4 +1,3 @@
-export { default as Dashboard } from './Dashboard';
 export { default as ActivityList } from './ActivityList';
 export { default as ActivityDetailPage } from './ActivityDetailPage';
 export { default as ActivityForm } from './ActivityForm';

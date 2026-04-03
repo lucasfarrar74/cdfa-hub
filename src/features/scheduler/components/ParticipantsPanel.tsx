@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { useSchedule } from '../context/ScheduleContext';
 import type { Supplier, Buyer, ContactPerson } from '../types';
 import { generateId } from '../utils/timeUtils';
@@ -21,6 +22,24 @@ export default function ParticipantsPanel() {
     autoAssignBuyerColors,
   } = useSchedule();
 
+  // Compute event days for multi-day events
+  const eventDays = useMemo(() => {
+    if (!eventConfig?.startDate || !eventConfig?.endDate) return [];
+    const days: Array<{ date: string; label: string; short: string }> = [];
+    const start = new Date(eventConfig.startDate + 'T00:00:00');
+    const end = new Date(eventConfig.endDate + 'T00:00:00');
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      days.push({
+        date: dateStr,
+        label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        short: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      });
+    }
+    return days;
+  }, [eventConfig?.startDate, eventConfig?.endDate]);
+  const isMultiDay = eventDays.length > 1;
+
   const [activeList, setActiveList] = useState<'suppliers' | 'buyers'>('suppliers');
   const [showForm, setShowForm] = useState(false);
   const [showSecondary, setShowSecondary] = useState(false);
@@ -42,6 +61,7 @@ export default function ParticipantsPanel() {
   const [buyerName, setBuyerName] = useState('');
   const [buyerOrg, setBuyerOrg] = useState('');
   const [buyerEmail, setBuyerEmail] = useState('');
+  const [editingBuyerId, setEditingBuyerId] = useState<string | null>(null);
 
   const resetForm = () => {
     setCompanyName('');
@@ -58,6 +78,7 @@ export default function ParticipantsPanel() {
     setShowSecondary(false);
     setShowForm(false);
     setEditingSupplierId(null);
+    setEditingBuyerId(null);
   };
 
   const handleEditSupplier = (supplier: Supplier) => {
@@ -124,87 +145,246 @@ export default function ParticipantsPanel() {
     resetForm();
   };
 
+  const handleEditBuyer = (buyer: Buyer) => {
+    setEditingBuyerId(buyer.id);
+    setBuyerName(buyer.name);
+    setBuyerOrg(buyer.organization);
+    setBuyerEmail(buyer.email || '');
+    setActiveList('buyers');
+    setShowForm(true);
+  };
+
   const handleAddBuyer = () => {
     if (!buyerName) return;
 
-    const buyer: Buyer = {
-      id: generateId(),
-      name: buyerName,
-      organization: buyerOrg,
-      email: buyerEmail || undefined,
-    };
+    if (editingBuyerId) {
+      updateBuyer(editingBuyerId, {
+        name: buyerName,
+        organization: buyerOrg,
+        email: buyerEmail || undefined,
+      });
+    } else {
+      const buyer: Buyer = {
+        id: generateId(),
+        name: buyerName,
+        organization: buyerOrg,
+        email: buyerEmail || undefined,
+      };
+      addBuyer(buyer);
+    }
 
-    addBuyer(buyer);
     resetForm();
+  };
+
+  // Extract a date from a Selection string like "Full Day Event - Los Angeles, April 17"
+  // Uses the event year from eventConfig, or current year as fallback
+  const parseDateFromSelection = (selection: string): string | null => {
+    if (!selection) return null;
+    // Match patterns like "April 17", "March 5", "Jun 22"
+    const monthMatch = selection.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})/i);
+    if (!monthMatch) return null;
+    const year = eventConfig?.startDate ? new Date(eventConfig.startDate + 'T00:00:00').getFullYear() : new Date().getFullYear();
+    const parsed = new Date(`${monthMatch[0]}, ${year}`);
+    if (isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().split('T')[0];
+  };
+
+  // Parse rows (from CSV or Excel) into suppliers or buyers
+  const processImportRows = (rows: Record<string, string>[]) => {
+    if (activeList === 'suppliers') {
+      // Group rows by company name to handle duplicates and additional participants
+      const companyMap = new Map<string, {
+        primary: { name: string; email?: string; phone?: string; title?: string };
+        secondary?: { name: string; email?: string; phone?: string; title?: string };
+        companyName: string;
+        selectedDays: string[];
+        duration: number;
+      }>();
+
+      for (const row of rows) {
+        const company = row['Company Name'] || row.company || row.Company || row.companyName || row.organization || row.Organization || '';
+        const firstName = row['First Name'] || row.firstName || '';
+        const lastName = row['Last Name'] || row.lastName || '';
+        const fullName = (firstName && lastName) ? `${firstName} ${lastName}`.trim()
+          : row.contact1_name || row.name || row.Name || row['Primary Contact'] || '';
+        const email = row.Email || row.email || row.contact1_email || '';
+        const phone = row.Phone || row.phone || row['Work Phone'] || row['Cell Phone'] || '';
+        const title = row.title || row.contact1_title || row.Title || '';
+
+        if (!company && !fullName) continue;
+
+        const companyKey = (company || fullName).toLowerCase().trim();
+
+        // Parse day selection from "Selection" column
+        const selection = row.Selection || row.selection || '';
+        const rowDays: string[] = [];
+        if (selection) {
+          const parts = selection.split(',').map(s => s.trim());
+          for (const part of parts) {
+            const date = parseDateFromSelection(part);
+            if (date && !rowDays.includes(date)) rowDays.push(date);
+          }
+        }
+
+        const existing = companyMap.get(companyKey);
+        if (existing) {
+          // Duplicate company row — add as secondary contact and merge days
+          if (!existing.secondary && fullName && fullName !== existing.primary.name) {
+            existing.secondary = {
+              name: fullName,
+              email: email || undefined,
+              phone: phone || undefined,
+              title: title || undefined,
+            };
+          }
+          // Merge day selections
+          for (const day of rowDays) {
+            if (!existing.selectedDays.includes(day)) existing.selectedDays.push(day);
+          }
+        } else {
+          companyMap.set(companyKey, {
+            companyName: company || fullName,
+            primary: {
+              name: fullName || company,
+              email: email || undefined,
+              phone: phone || undefined,
+              title: title || undefined,
+            },
+            selectedDays: rowDays,
+            duration: Number(row.duration || row.Duration) || eventConfig?.defaultMeetingDuration || 15,
+          });
+        }
+      }
+
+      // Build supplier list, skipping companies that already exist in the project
+      const existingNames = new Set(suppliers.map(s => s.companyName.toLowerCase().trim()));
+
+      const parsed: Supplier[] = [];
+      for (const entry of companyMap.values()) {
+        if (existingNames.has(entry.companyName.toLowerCase().trim())) continue;
+
+        parsed.push({
+          id: generateId(),
+          companyName: entry.companyName,
+          primaryContact: entry.primary,
+          secondaryContact: entry.secondary,
+          meetingDuration: entry.duration,
+          preference: 'all',
+          preferenceList: [],
+          selectedDays: entry.selectedDays.length > 0 ? entry.selectedDays : undefined,
+        });
+      }
+
+      importSuppliers(parsed);
+    } else {
+      const existingBuyerNames = new Set(buyers.map(b => b.name.toLowerCase().trim()));
+
+      const parsed: Buyer[] = rows
+        .map(row => {
+          const firstName = row['First Name'] || row.firstName || '';
+          const lastName = row['Last Name'] || row.lastName || '';
+          const name = (firstName && lastName) ? `${firstName} ${lastName}`.trim()
+            : row.name || row.Name || '';
+          return {
+            id: generateId(),
+            name,
+            organization: row.organization || row.Organization || row.company || row.Company || row['Company Name'] || '',
+            email: row.email || row.Email || undefined,
+          };
+        })
+        .filter(b => b.name && !existingBuyerNames.has(b.name.toLowerCase().trim()));
+
+      importBuyers(parsed);
+    }
+  };
+
+  // Detect header row in Excel data (array of arrays)
+  const findHeaderRow = (data: string[][]): number => {
+    const knownHeaders = ['company', 'company name', 'first name', 'last name', 'name', 'email', 'organization', 'phone'];
+    for (let i = 0; i < Math.min(15, data.length); i++) {
+      const row = (data[i] || []).map(cell => String(cell || '').toLowerCase().trim());
+      const matches = row.filter(cell => knownHeaders.some(h => cell.includes(h)));
+      if (matches.length >= 2) return i;
+    }
+    return 0;
+  };
+
+  // Filter out section headers and empty rows from Excel data
+  const isDataRow = (row: Record<string, string>): boolean => {
+    const values = Object.values(row).filter(v => v && String(v).trim());
+    if (values.length < 2) return false;
+    // Skip rows that look like section headers (only first column has data, and it's not a number)
+    const firstVal = String(Object.values(row)[0] || '').trim();
+    if (values.length <= 1 && isNaN(Number(firstVal))) return false;
+    return true;
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: result => {
-        const data = result.data as Record<string, string>[];
+    const ext = file.name.split('.').pop()?.toLowerCase();
 
-        if (activeList === 'suppliers') {
-          // CSV format: company, contact1_name, contact1_email, contact1_title, contact2_name, contact2_email, contact2_title, duration
-          const parsed: Supplier[] = data
-            .map(row => {
-              const company = row.company || row.Company || row.companyName || row.organization || '';
-              const contact1Name = row.contact1_name || row.name || row.Name || '';
+    if (ext === 'csv') {
+      // CSV parsing via PapaParse
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: result => {
+          processImportRows(result.data as Record<string, string>[]);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        },
+      });
+    } else {
+      // Excel parsing via xlsx
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = evt.target?.result;
+        if (!data) return;
 
-              if (!company && !contact1Name) return null;
+        const wb = XLSX.read(data, { type: 'array' });
 
-              const secondaryContact: ContactPerson | undefined =
-                row.contact2_name
-                  ? {
-                      name: row.contact2_name,
-                      email: row.contact2_email,
-                      title: row.contact2_title,
-                    }
-                  : undefined;
-
-              const supplier: Supplier = {
-                id: generateId(),
-                companyName: company || contact1Name,
-                primaryContact: {
-                  name: contact1Name || company,
-                  email: row.contact1_email || row.email || row.Email,
-                  title: row.contact1_title || row.title,
-                },
-                secondaryContact,
-                meetingDuration:
-                  Number(row.duration || row.Duration) ||
-                  eventConfig?.defaultMeetingDuration ||
-                  15,
-                preference: 'all',
-                preferenceList: [],
-              };
-              return supplier;
-            })
-            .filter((s): s is Supplier => s !== null);
-
-          importSuppliers(parsed);
-        } else {
-          const parsed: Buyer[] = data
-            .map(row => ({
-              id: generateId(),
-              name: row.name || row.Name || '',
-              organization: row.organization || row.Organization || row.company || row.Company || '',
-              email: row.email || row.Email || undefined,
-            }))
-            .filter(b => b.name);
-
-          importBuyers(parsed);
+        // Pick the best sheet: prefer one with "Selection" column, fall back to first
+        let sheetName = wb.SheetNames[0];
+        for (const name of wb.SheetNames) {
+          const s = wb.Sheets[name];
+          const peek = XLSX.utils.sheet_to_json<string[]>(s, { header: 1 }) as string[][];
+          for (let r = 0; r < Math.min(10, peek.length); r++) {
+            const row = peek[r] || [];
+            if (row.some(cell => String(cell || '').trim().toLowerCase() === 'selection')) {
+              sheetName = name;
+              break;
+            }
+          }
+          if (sheetName === name && name !== wb.SheetNames[0]) break;
         }
 
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+        const sheet = wb.Sheets[sheetName];
+        const rawData = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 }) as string[][];
+
+        // Find header row
+        const headerIdx = findHeaderRow(rawData);
+        const headers = rawData[headerIdx].map(h => String(h || '').trim());
+
+        // Convert to array of objects using detected headers
+        const rows: Record<string, string>[] = [];
+        for (let i = headerIdx + 1; i < rawData.length; i++) {
+          const row = rawData[i];
+          if (!row || row.length === 0) continue;
+          const obj: Record<string, string> = {};
+          headers.forEach((h, j) => {
+            if (h) obj[h] = String(row[j] ?? '').trim();
+          });
+          if (isDataRow(obj)) {
+            rows.push(obj);
+          }
         }
-      },
-    });
+
+        processImportRows(rows);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      };
+      reader.readAsArrayBuffer(file);
+    }
   };
 
   return (
@@ -258,11 +438,11 @@ export default function ParticipantsPanel() {
               + Add {activeList === 'suppliers' ? 'Supplier' : 'Buyer'}
             </button>
             <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer">
-              Import CSV
+              Import File
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.xls,.xlsx"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -428,7 +608,7 @@ export default function ParticipantsPanel() {
                   disabled={!buyerName}
                   className="px-4 py-2 bg-green-500 dark:bg-green-600 text-white rounded-md hover:bg-green-600 dark:hover:bg-green-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-sm"
                 >
-                  Add Buyer
+                  {editingBuyerId ? 'Save Buyer' : 'Add Buyer'}
                 </button>
                 <button
                   onClick={resetForm}
@@ -452,7 +632,10 @@ export default function ParticipantsPanel() {
                     <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
                       <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Company</th>
                       <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Primary Contact</th>
-                      <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Secondary Contact</th>
+                      {isMultiDay && (
+                        <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Days</th>
+                      )}
+                      <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Available</th>
                       <th className="pb-2 font-medium text-gray-900 dark:text-gray-100">Duration</th>
                       <th className="pb-2"></th>
                     </tr>
@@ -463,24 +646,76 @@ export default function ParticipantsPanel() {
                         <td className="py-2 font-medium text-gray-900 dark:text-gray-100">{supplier.companyName}</td>
                         <td className="py-2 text-gray-900 dark:text-gray-100">
                           <div>{supplier.primaryContact.name}</div>
-                          {supplier.primaryContact.title && (
+                          {supplier.primaryContact.email && (
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {supplier.primaryContact.title}
+                              {supplier.primaryContact.email}
                             </div>
                           )}
                         </td>
-                        <td className="py-2">
-                          {supplier.secondaryContact ? (
-                            <>
-                              <div className="text-gray-900 dark:text-gray-100">{supplier.secondaryContact.name}</div>
-                              {supplier.secondaryContact.title && (
-                                <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  {supplier.secondaryContact.title}
-                                </div>
+                        {isMultiDay && (
+                          <td className="py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {eventDays.map(day => {
+                                const isSelected = supplier.selectedDays?.includes(day.date);
+                                const noSelection = !supplier.selectedDays || supplier.selectedDays.length === 0;
+                                return (
+                                  <button
+                                    key={day.date}
+                                    onClick={() => {
+                                      const current = supplier.selectedDays || [];
+                                      const updated = isSelected
+                                        ? current.filter(d => d !== day.date)
+                                        : [...current, day.date];
+                                      updateSupplier(supplier.id, { selectedDays: updated.length > 0 ? updated : undefined });
+                                    }}
+                                    className={`px-2 py-0.5 text-xs rounded-full font-medium transition-colors ${
+                                      isSelected
+                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                        : noSelection
+                                          ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50'
+                                    }`}
+                                    title={`${isSelected ? 'Remove from' : 'Add to'} ${day.label}`}
+                                  >
+                                    {day.short}
+                                  </button>
+                                );
+                              })}
+                              {!supplier.selectedDays?.length && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500">All days</span>
                               )}
-                            </>
-                          ) : (
-                            <span className="text-gray-400 dark:text-gray-500">-</span>
+                            </div>
+                          </td>
+                        )}
+                        <td className="py-2">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="time"
+                              value={supplier.availableFrom || ''}
+                              onChange={e => updateSupplier(supplier.id, { availableFrom: e.target.value || undefined })}
+                              className="w-[5.5rem] px-1 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                              title="Available from"
+                            />
+                            <span className="text-xs text-gray-400">–</span>
+                            <input
+                              type="time"
+                              value={supplier.availableTo || ''}
+                              onChange={e => updateSupplier(supplier.id, { availableTo: e.target.value || undefined })}
+                              className="w-[5.5rem] px-1 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                              title="Available until"
+                            />
+                            {(supplier.availableFrom || supplier.availableTo) && (
+                              <button
+                                onClick={() => updateSupplier(supplier.id, { availableFrom: undefined, availableTo: undefined })}
+                                className="text-gray-400 hover:text-red-500 text-xs ml-0.5"
+                                title="Clear time restriction"
+                              >
+                                x
+                              </button>
+                            )}
+                          </div>
+                          {!supplier.availableFrom && !supplier.availableTo && (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">All day</span>
                           )}
                         </td>
                         <td className="py-2 text-gray-900 dark:text-gray-100">{supplier.meetingDuration} min</td>
@@ -533,47 +768,23 @@ export default function ParticipantsPanel() {
                     {buyers.map((buyer, index) => (
                       <tr key={buyer.id} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="py-2">
-                          <div className="relative">
-                            <button
-                              onClick={() => setColorPickerOpen(colorPickerOpen === buyer.id ? null : buyer.id)}
-                              className="w-6 h-6 rounded border-2 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
-                              style={{ backgroundColor: buyer.color || getBuyerColor(index) }}
-                              title="Click to change color"
-                            />
-                            {colorPickerOpen === buyer.id && (
-                              <div className="absolute z-20 mt-1 left-0 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg dark:shadow-gray-900/50 p-2">
-                                <div className="grid grid-cols-4 gap-1">
-                                  {BUYER_COLORS.map(color => (
-                                    <button
-                                      key={color}
-                                      onClick={() => {
-                                        updateBuyer(buyer.id, { color });
-                                        setColorPickerOpen(null);
-                                      }}
-                                      className={`w-6 h-6 rounded border-2 hover:scale-110 transition-transform ${
-                                        buyer.color === color ? 'border-gray-800 dark:border-gray-200' : 'border-transparent'
-                                      }`}
-                                      style={{ backgroundColor: color }}
-                                    />
-                                  ))}
-                                </div>
-                                <button
-                                  onClick={() => {
-                                    updateBuyer(buyer.id, { color: undefined });
-                                    setColorPickerOpen(null);
-                                  }}
-                                  className="mt-2 w-full text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-                                >
-                                  Reset to auto
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            onClick={() => setColorPickerOpen(colorPickerOpen === buyer.id ? null : buyer.id)}
+                            className="w-6 h-6 rounded border-2 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
+                            style={{ backgroundColor: buyer.color || getBuyerColor(index) }}
+                            title="Click to change color"
+                          />
                         </td>
                         <td className="py-2 text-gray-900 dark:text-gray-100">{buyer.name}</td>
                         <td className="py-2 text-gray-900 dark:text-gray-100">{buyer.organization || '-'}</td>
                         <td className="py-2 text-gray-900 dark:text-gray-100">{buyer.email || '-'}</td>
                         <td className="py-2">
+                          <button
+                            onClick={() => handleEditBuyer(buyer)}
+                            className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mr-3"
+                          >
+                            Edit
+                          </button>
                           <button
                             onClick={() => removeBuyer(buyer.id)}
                             className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
@@ -586,6 +797,51 @@ export default function ParticipantsPanel() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Color picker modal — rendered outside table to avoid overflow clipping */}
+              {colorPickerOpen && (
+                <div className="fixed inset-0 z-50" onClick={() => setColorPickerOpen(null)}>
+                  <div
+                    className="absolute bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl dark:shadow-gray-900/50 p-3"
+                    style={{
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                      {buyers.find(b => b.id === colorPickerOpen)?.name}
+                    </p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {BUYER_COLORS.map(color => (
+                        <button
+                          key={color}
+                          onClick={() => {
+                            updateBuyer(colorPickerOpen, { color });
+                            setColorPickerOpen(null);
+                          }}
+                          className={`w-7 h-7 rounded border-2 hover:scale-110 transition-transform ${
+                            buyers.find(b => b.id === colorPickerOpen)?.color === color
+                              ? 'border-gray-800 dark:border-gray-200'
+                              : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        updateBuyer(colorPickerOpen, { color: undefined });
+                        setColorPickerOpen(null);
+                      }}
+                      className="mt-2 w-full text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                    >
+                      Reset to auto
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
