@@ -16,6 +16,9 @@ export default function EventConfigPanel() {
   const [schedulingStrategy, setSchedulingStrategy] = useState<SchedulingStrategy>(
     eventConfig?.schedulingStrategy || 'efficient'
   );
+  const [optimizationEnabled, setOptimizationEnabled] = useState(
+    eventConfig?.optimizationEnabled !== false // Default true
+  );
 
   useEffect(() => {
     if (eventConfig) {
@@ -27,6 +30,7 @@ export default function EventConfigPanel() {
       setDuration(eventConfig.defaultMeetingDuration);
       setBreaks(eventConfig.breaks);
       setSchedulingStrategy(eventConfig.schedulingStrategy);
+      setOptimizationEnabled(eventConfig.optimizationEnabled !== false);
     }
   }, [eventConfig]);
 
@@ -53,6 +57,7 @@ export default function EventConfigPanel() {
       defaultMeetingDuration: duration,
       breaks,
       schedulingStrategy,
+      optimizationEnabled,
     };
     setEventConfig(config);
   };
@@ -151,6 +156,21 @@ export default function EventConfigPanel() {
               {schedulingStrategy === 'efficient'
                 ? 'Packs meetings at the beginning of each day for maximum efficiency.'
                 : 'Distributes meetings evenly across all event days to avoid front-loading.'}
+            </p>
+
+            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={optimizationEnabled}
+                onChange={e => setOptimizationEnabled(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                Optimize schedule (minimize gaps between meetings)
+              </span>
+            </label>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 ml-6">
+              Evaluates multiple candidate schedules and selects the one with fewest consecutive empty slots per company.
             </p>
           </div>
         </div>

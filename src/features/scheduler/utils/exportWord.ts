@@ -41,9 +41,9 @@ interface ExportData {
 }
 
 // Professional blue color for headers
-const HEADER_COLOR = '2563EB';
+const HEADER_COLOR = '1C4C37';
 const HEADER_TEXT_COLOR = 'FFFFFF';
-const ALT_ROW_COLOR = 'F3F4F6';
+const ALT_ROW_COLOR = 'E8F1ED';
 
 /**
  * Create a professional header for the document
@@ -140,19 +140,20 @@ function createHeaderCell(text: string, width?: number): TableCell {
 }
 
 /**
- * Create a styled table data cell
+ * Create a styled table data cell with proper text wrapping
  */
-function createDataCell(text: string, isAltRow: boolean = false): TableCell {
+function createDataCell(text: string, isAltRow: boolean = false, fontSize: number = 20): TableCell {
   return new TableCell({
     children: [
       new Paragraph({
         children: [
           new TextRun({
             text,
-            size: 20,
+            size: fontSize,
           }),
         ],
         alignment: AlignmentType.LEFT,
+        spacing: { before: 20, after: 20 },
       }),
     ],
     shading: isAltRow
@@ -417,9 +418,26 @@ export async function exportMasterScheduleToWord(data: ExportData): Promise<void
     })
   );
 
+  const maxColsPerPage = 7;
+
   // Process by day if multi-day
   for (const date of dates) {
     const daySlots = meetingSlots.filter(s => s.date === date);
+
+    // Filter to only suppliers with meetings on this day
+    const daySuppliers = suppliers.filter(supplier =>
+      daySlots.some(slot =>
+        activeMeetings.some(m => m.supplierId === supplier.id && m.timeSlotId === slot.id)
+      )
+    );
+
+    if (daySuppliers.length === 0) continue;
+
+    // Split filtered suppliers into readable groups
+    const supplierGroups: typeof suppliers[] = [];
+    for (let i = 0; i < daySuppliers.length; i += maxColsPerPage) {
+      supplierGroups.push(daySuppliers.slice(i, i + maxColsPerPage));
+    }
 
     if (isMultiDay) {
       sections.push(
@@ -436,40 +454,70 @@ export async function exportMasterScheduleToWord(data: ExportData): Promise<void
       );
     }
 
-    // Create header row with Time + all supplier names
-    const headerRow = new TableRow({
-      children: [
-        createHeaderCell('Time', 1200),
-        ...suppliers.map(s => createHeaderCell(s.companyName.substring(0, 15), 1400)),
-      ],
-      tableHeader: true,
-    });
+    // One table per supplier group
+    for (let groupIdx = 0; groupIdx < supplierGroups.length; groupIdx++) {
+      const group = supplierGroups[groupIdx];
 
-    // Create data rows for each time slot
-    const dataRows = daySlots.map((slot, index) => {
-      const isAlt = index % 2 === 1;
+      // Page break between groups
+      if (groupIdx > 0) {
+        sections.push(new Paragraph({ children: [new PageBreak()] }));
+        // Repeat day header
+        if (isMultiDay) {
+          sections.push(
+            new Paragraph({
+              children: [new TextRun({ text: formatDateReadable(date), bold: true, size: 24 })],
+              spacing: { before: 200, after: 100 },
+            })
+          );
+        }
+        // Group label
+        sections.push(
+          new Paragraph({
+            children: [new TextRun({
+              text: `Suppliers ${groupIdx * maxColsPerPage + 1}-${Math.min((groupIdx + 1) * maxColsPerPage, daySuppliers.length)} of ${daySuppliers.length}`,
+              size: 18,
+              color: '6B7280',
+            })],
+            spacing: { after: 200 },
+          })
+        );
+      }
 
-      return new TableRow({
+      // Column width: divide available space among columns
+      const supplierColWidth = Math.floor(13000 / (group.length + 1));
+
+      const headerRow = new TableRow({
         children: [
-          createDataCell(safeFormatTime(slot.startTime), isAlt),
-          ...suppliers.map(supplier => {
-            const meeting = activeMeetings.find(
-              m => m.supplierId === supplier.id && m.timeSlotId === slot.id
-            );
-            const buyer = meeting ? getBuyer(meeting.buyerId) : null;
-            return createDataCell(buyer?.name?.substring(0, 12) || '-', isAlt);
-          }),
+          createHeaderCell('Time', 1500),
+          ...group.map(s => createHeaderCell(s.companyName, supplierColWidth)),
         ],
+        tableHeader: true,
       });
-    });
 
-    sections.push(
-      new Table({
-        rows: [headerRow, ...dataRows],
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        layout: TableLayoutType.FIXED,
-      })
-    );
+      const dataRows = daySlots.map((slot, index) => {
+        const isAlt = index % 2 === 1;
+        return new TableRow({
+          children: [
+            createDataCell(safeFormatTime(slot.startTime), isAlt),
+            ...group.map(supplier => {
+              const meeting = activeMeetings.find(
+                m => m.supplierId === supplier.id && m.timeSlotId === slot.id
+              );
+              const buyer = meeting ? getBuyer(meeting.buyerId) : null;
+              return createDataCell(buyer?.name || '-', isAlt);
+            }),
+          ],
+        });
+      });
+
+      sections.push(
+        new Table({
+          rows: [headerRow, ...dataRows],
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          layout: TableLayoutType.FIXED,
+        })
+      );
+    }
   }
 
   const doc = new Document({

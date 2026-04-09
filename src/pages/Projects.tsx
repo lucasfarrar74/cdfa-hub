@@ -1,20 +1,14 @@
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { ProjectsProvider } from '../features/projects/context/ProjectsContext';
 import {
-  Dashboard,
   ActivityList,
-  CalendarView,
-  TimelineView,
   TemplateEditor,
   TeamDashboard,
   StaffDirectory,
 } from '../features/projects/components';
 
 const tabs = [
-  { label: 'Overview', path: '/projects', end: true },
-  { label: 'Activities', path: '/projects/activities', end: false },
-  { label: 'Calendar', path: '/projects/calendar', end: false },
-  { label: 'Timeline', path: '/projects/timeline', end: false },
+  { label: 'Activities', path: '/projects', end: true },
   { label: 'Team', path: '/projects/team', end: false },
   { label: 'Templates', path: '/projects/templates', end: false },
 ];
@@ -45,10 +39,7 @@ export function Projects() {
         </nav>
         <div className="flex-1 overflow-auto pt-6">
           <Routes>
-            <Route index element={<Dashboard />} />
-            <Route path="activities" element={<ActivityList />} />
-            <Route path="calendar" element={<CalendarView />} />
-            <Route path="timeline" element={<TimelineView />} />
+            <Route index element={<ActivityList />} />
             <Route path="team" element={<TeamDashboard />} />
             <Route path="team/directory" element={<StaffDirectory />} />
             <Route path="templates" element={<TemplateEditor />} />

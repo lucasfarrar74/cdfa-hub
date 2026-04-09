@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import type { Supplier, Buyer, EventConfig, AvailabilityRestriction } from '../types';
+import { findBestBuyerMatch } from './matchBuyer';
 
 // --- Types ---
 
@@ -71,11 +72,11 @@ export function generatePreferenceWorkbook(
     ['  - Exclude: You do NOT want to meet with this buyer'],
     ['  - No Preference: You have no strong preference (may or may not be scheduled)'],
     [],
-    ['Buyer Name', 'Organization', 'Meet', 'Exclude', 'No Preference'],
+    ['Buyer Name', 'Organization', 'Meet', 'Exclude', 'No Preference', '__BUYER_ID__'],
   ];
 
   for (const buyer of buyers) {
-    prefData.push([buyer.name, buyer.organization, '', '', '']);
+    prefData.push([buyer.name, buyer.organization, '', '', '', buyer.id]);
   }
 
   // Add metadata row (hidden info for import matching)
@@ -91,6 +92,7 @@ export function generatePreferenceWorkbook(
     { wch: 12 }, // Meet
     { wch: 12 }, // Exclude
     { wch: 16 }, // No Preference
+    { wch: 0, hidden: true }, // Buyer ID (hidden metadata)
   ];
 
   // Merge title row
@@ -168,16 +170,21 @@ export function parsePreferenceWorkbook(
 
   const data = XLSX.utils.sheet_to_json<string[]>(prefSheet, { header: 1 }) as string[][];
 
-  // Find supplier ID from metadata row
+  // Find supplier ID from metadata row (search forward and backward for resilience)
   let supplierId = '';
   let supplierName = '';
 
   for (const row of data) {
-    if (row[0] === '__SUPPLIER_ID__') {
-      supplierId = String(row[1] || '');
-    }
-    if (row[0] === 'Supplier:') {
+    if (row && row[0] === 'Supplier:') {
       supplierName = String(row[1] || '');
+    }
+  }
+  // Search backward for __SUPPLIER_ID__ in case blank rows were inserted
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    if (row && row[0] === '__SUPPLIER_ID__') {
+      supplierId = String(row[1] || '');
+      break;
     }
   }
 
@@ -192,24 +199,41 @@ export function parsePreferenceWorkbook(
 
   if (headerIdx < 0) return null;
 
+  // Helper: check if a cell value represents a marked/checked state
+  const isMarked = (val: string): boolean => {
+    const v = val.trim().toUpperCase();
+    return v === 'X' || v === 'YES' || v === 'Y' || v === '1' || v === 'TRUE';
+  };
+
   // Parse preference rows
   const preferences: ParsedPreferences['preferences'] = [];
   for (let i = headerIdx + 1; i < data.length; i++) {
     const row = data[i];
-    if (!row || !row[0] || row[0] === '__SUPPLIER_ID__' || row[0] === '') break;
+    if (!row || row.length === 0) continue; // skip fully empty rows
+    if (row[0] === '__SUPPLIER_ID__') break; // stop at metadata sentinel
 
-    const buyerName = String(row[0]).trim();
-    const meet = String(row[2] || '').trim().toUpperCase();
-    const exclude = String(row[3] || '').trim().toUpperCase();
+    const buyerName = row[0] != null ? String(row[0]).trim() : '';
+    if (!buyerName) continue; // skip rows with empty buyer name
 
-    // Match buyer by name
-    const buyer = buyers.find(b =>
-      b.name.toLowerCase() === buyerName.toLowerCase()
-    );
+    const buyerOrg = row[1] != null ? String(row[1]).trim() : '';
+    const meet = String(row[2] || '').trim();
+    const exclude = String(row[3] || '').trim();
+
+    // Priority 1: Match by embedded buyer ID (hidden column 5)
+    const buyerIdFromForm = row[5] != null ? String(row[5]).trim() : '';
+    let buyer: Buyer | undefined;
+    if (buyerIdFromForm && buyerIdFromForm !== '__BUYER_ID__') {
+      buyer = buyers.find(b => b.id === buyerIdFromForm);
+    }
+    // Priority 2: Fuzzy match by name + organization
+    if (!buyer) {
+      const match = findBestBuyerMatch(buyers, buyerName, buyerOrg || undefined);
+      buyer = match ? buyers.find(b => b.id === match.id) : undefined;
+    }
 
     let choice: 'meet' | 'exclude' | 'no_preference' = 'no_preference';
-    if (meet === 'X' || meet === 'YES' || meet === 'Y') choice = 'meet';
-    else if (exclude === 'X' || exclude === 'YES' || exclude === 'Y') choice = 'exclude';
+    if (isMarked(meet)) choice = 'meet';
+    else if (isMarked(exclude)) choice = 'exclude';
 
     preferences.push({
       buyerId: buyer?.id || '',

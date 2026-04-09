@@ -14,27 +14,24 @@ export const navigationItems: NavigationItem[] = [
     path: '/projects',
     icon: 'clipboard-document-list',
     section: 'tools',
-    children: [
-      { id: 'projects-dashboard', label: 'Overview', path: '/projects' },
-      { id: 'projects-activities', label: 'Activities', path: '/projects/activities' },
-      { id: 'projects-calendar', label: 'Calendar', path: '/projects/calendar' },
-      { id: 'projects-timeline', label: 'Timeline', path: '/projects/timeline' },
-    ],
   },
   {
     id: 'meeting-scheduler',
-    label: 'Meeting Scheduler',
+    label: 'Meetings',
     path: '/meeting-scheduler',
     icon: 'calendar',
     section: 'tools',
   },
   {
     id: 'budget-tracker',
-    label: 'Budget Tracker',
+    label: 'Budget',
     path: '/budget-tracker',
     icon: 'currency-dollar',
     section: 'tools',
   },
+];
+
+export const utilityItems: NavigationItem[] = [
   {
     id: 'data-import',
     label: 'Import Data',

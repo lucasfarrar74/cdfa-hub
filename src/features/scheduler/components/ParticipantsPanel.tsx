@@ -245,7 +245,7 @@ export default function ParticipantsPanel() {
           companyMap.set(companyKey, {
             companyName: company || fullName,
             primary: {
-              name: fullName || company,
+              name: fullName,
               email: email || undefined,
               phone: phone || undefined,
               title: title || undefined,

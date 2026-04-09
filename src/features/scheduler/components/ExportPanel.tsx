@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
 import { formatTime, formatDateRange, formatDateReadable, getUniqueDatesFromSlots } from '../utils/timeUtils';
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import {
   exportSupplierScheduleToWord,
   exportBuyerScheduleToWord,
   exportMasterScheduleToWord,
 } from '../utils/exportWord';
+import { downloadSignInSheets } from '../utils/signInSheetWord';
+import { loadWusataImages, loadWusataLogo } from '../utils/wusataAssets';
 
 // Safe wrapper for formatTime - handles both Date objects and serialized strings
 function safeFormatTime(time: Date | string): string {
@@ -55,7 +58,7 @@ export default function ExportPanel() {
   // Helper to add professional header to PDF
   const addPdfHeader = (doc: jsPDF, title: string): number => {
     // Blue header bar
-    doc.setFillColor(37, 99, 235);
+    doc.setFillColor(28, 76, 55);
     doc.rect(0, 0, 220, 20, 'F');
 
     // Event name in header
@@ -106,63 +109,60 @@ export default function ExportPanel() {
     const doc = new jsPDF();
 
     suppliers.forEach((supplier, supplierIndex) => {
-      // Add new page for each supplier (except first)
       if (supplierIndex > 0) {
         doc.addPage();
       }
 
       let y = addPdfHeader(doc, 'Schedule by Supplier');
 
-      // Supplier name with subtle background
-      doc.setFillColor(243, 244, 246);
-      doc.rect(14, y - 5, 182, 8, 'F');
+      // Supplier name
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(0, 0, 0);
       doc.text(supplier.companyName, 16, y);
       y += 5;
 
+      // Contact info
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(107, 114, 128);
-      doc.text(
-        `Contact: ${supplier.primaryContact.name}${supplier.primaryContact.email ? ` (${supplier.primaryContact.email})` : ''}`,
-        16,
-        y
-      );
+      const contactStr = `Contact: ${supplier.primaryContact.name}${supplier.primaryContact.email ? ` (${supplier.primaryContact.email})` : ''}`;
+      doc.text(contactStr, 16, y);
       if (supplier.secondaryContact) {
-        y += 4;
+        y += 5;
         doc.text(
           `Secondary: ${supplier.secondaryContact.name}${supplier.secondaryContact.email ? ` (${supplier.secondaryContact.email})` : ''}`,
           16,
           y
         );
       }
-      y += 6;
+      y += 4;
 
-      doc.setFontSize(9);
-      doc.setTextColor(0, 0, 0);
+      // Build table data
       const supplierMeetings = activeMeetings.filter(m => m.supplierId === supplier.id);
+      const columns = isMultiDay
+        ? [{ header: 'Date', dataKey: 'date' }, { header: 'Time', dataKey: 'time' }, { header: 'Buyer', dataKey: 'buyer' }, { header: 'Organization', dataKey: 'org' }]
+        : [{ header: 'Time', dataKey: 'time' }, { header: 'Buyer', dataKey: 'buyer' }, { header: 'Organization', dataKey: 'org' }];
 
-      meetingSlots.forEach((slot, slotIndex) => {
-        if (y > 280) {
-          doc.addPage();
-          y = 25;
-        }
+      const rows = meetingSlots.map(slot => {
         const meeting = supplierMeetings.find(m => m.timeSlotId === slot.id);
         const buyer = meeting ? getBuyer(meeting.buyerId) : null;
+        return {
+          date: formatDateReadable(slot.date).split(',')[0],
+          time: safeFormatTime(slot.startTime),
+          buyer: buyer?.name || '-',
+          org: buyer?.organization || '-',
+        };
+      });
 
-        // Alternating row colors
-        if (slotIndex % 2 === 0) {
-          doc.setFillColor(249, 250, 251);
-          doc.rect(16, y - 3, 178, 5, 'F');
-        }
-
-        const timeStr = isMultiDay
-          ? `${formatDateReadable(slot.date).split(',')[0]} ${safeFormatTime(slot.startTime)}`
-          : safeFormatTime(slot.startTime);
-        doc.text(`${timeStr}: ${buyer?.name || '-'}`, 20, y);
-        y += 5;
+      autoTable(doc, {
+        startY: y,
+        columns,
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [28, 76, 55], textColor: [255, 255, 255], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [232, 241, 237] },
+        margin: { left: 14, right: 14 },
       });
     });
 
@@ -180,46 +180,44 @@ export default function ExportPanel() {
     const doc = new jsPDF();
 
     buyers.forEach((buyer, buyerIndex) => {
-      // Add new page for each buyer (except first)
       if (buyerIndex > 0) {
         doc.addPage();
       }
 
       let y = addPdfHeader(doc, 'Schedule by Buyer');
 
-      // Buyer name with subtle background
-      doc.setFillColor(243, 244, 246);
-      doc.rect(14, y - 5, 182, 8, 'F');
+      // Buyer name
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(0, 0, 0);
       doc.text(`${buyer.name} (${buyer.organization})`, 16, y);
-      y += 8;
+      y += 6;
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(0, 0, 0);
+      // Build table data
       const buyerMeetings = activeMeetings.filter(m => m.buyerId === buyer.id);
+      const columns = isMultiDay
+        ? [{ header: 'Date', dataKey: 'date' }, { header: 'Time', dataKey: 'time' }, { header: 'Supplier', dataKey: 'supplier' }, { header: 'Contact', dataKey: 'contact' }]
+        : [{ header: 'Time', dataKey: 'time' }, { header: 'Supplier', dataKey: 'supplier' }, { header: 'Contact', dataKey: 'contact' }];
 
-      meetingSlots.forEach((slot, slotIndex) => {
-        if (y > 280) {
-          doc.addPage();
-          y = 25;
-        }
+      const rows = meetingSlots.map(slot => {
         const meeting = buyerMeetings.find(m => m.timeSlotId === slot.id);
         const supplier = meeting ? getSupplier(meeting.supplierId) : null;
+        return {
+          date: formatDateReadable(slot.date).split(',')[0],
+          time: safeFormatTime(slot.startTime),
+          supplier: supplier?.companyName || '-',
+          contact: supplier?.primaryContact.name || '-',
+        };
+      });
 
-        // Alternating row colors
-        if (slotIndex % 2 === 0) {
-          doc.setFillColor(249, 250, 251);
-          doc.rect(16, y - 3, 178, 5, 'F');
-        }
-
-        const timeStr = isMultiDay
-          ? `${formatDateReadable(slot.date).split(',')[0]} ${safeFormatTime(slot.startTime)}`
-          : safeFormatTime(slot.startTime);
-        doc.text(`${timeStr}: ${supplier?.companyName || '-'}`, 20, y);
-        y += 5;
+      autoTable(doc, {
+        startY: y,
+        columns,
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [28, 76, 55], textColor: [255, 255, 255], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [232, 241, 237] },
+        margin: { left: 14, right: 14 },
       });
     });
 
@@ -236,8 +234,8 @@ export default function ExportPanel() {
     try {
     const doc = new jsPDF('landscape');
 
-    // Professional header for landscape
-    doc.setFillColor(37, 99, 235);
+    // Professional header bar
+    doc.setFillColor(28, 76, 55);
     doc.rect(0, 0, 300, 18, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(12);
@@ -254,65 +252,92 @@ export default function ExportPanel() {
     doc.setFont('helvetica', 'bold');
     doc.text('Master Schedule Grid', 14, y);
     doc.setFont('helvetica', 'normal');
-    y += 10;
+    y += 8;
 
-    // Process by day if multi-day
+    const maxColsPerPage = 7;
+
+    // Process by day
     for (const date of dates) {
       const daySlots = meetingSlots.filter(s => s.date === date);
 
+      // Filter to only suppliers with meetings on this day
+      const daySuppliers = suppliers.filter(supplier =>
+        daySlots.some(slot =>
+          activeMeetings.some(m => m.supplierId === supplier.id && m.timeSlotId === slot.id)
+        )
+      );
+
+      if (daySuppliers.length === 0) continue;
+
+      // Split filtered suppliers into readable groups
+      const supplierGroups: typeof suppliers[] = [];
+      for (let i = 0; i < daySuppliers.length; i += maxColsPerPage) {
+        supplierGroups.push(daySuppliers.slice(i, i + maxColsPerPage));
+      }
+
       if (isMultiDay) {
-        if (y > 180) {
-          doc.addPage('landscape');
-          y = 20;
-        }
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.text(formatDateReadable(date), 14, y);
         doc.setFont('helvetica', 'normal');
-        y += 6;
+        y += 4;
       }
 
-      // Header row with blue background
-      const colWidth = Math.min((270 - 30) / suppliers.length, 25);
-      doc.setFillColor(37, 99, 235);
-      doc.rect(14, y - 4, 270, 6, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Time', 16, y);
-      suppliers.forEach((s, i) => {
-        doc.text(s.companyName.substring(0, 10), 35 + i * colWidth, y);
-      });
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(0, 0, 0);
-      y += 6;
+      // Render one table per supplier group
+      for (let groupIdx = 0; groupIdx < supplierGroups.length; groupIdx++) {
+        const group = supplierGroups[groupIdx];
 
-      // Grid rows
-      daySlots.forEach((slot, slotIndex) => {
-        if (y > 190) {
+        // Add page break between groups (except first)
+        if (groupIdx > 0) {
           doc.addPage('landscape');
           y = 20;
+          // Repeat day header on new page
+          if (isMultiDay) {
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(formatDateReadable(date), 14, y);
+            doc.setFont('helvetica', 'normal');
+            y += 4;
+          }
+          // Show group label
+          doc.setFontSize(8);
+          doc.setTextColor(107, 114, 128);
+          doc.text(`Suppliers ${groupIdx * maxColsPerPage + 1}-${Math.min((groupIdx + 1) * maxColsPerPage, daySuppliers.length)} of ${daySuppliers.length}`, 14, y);
+          doc.setTextColor(0, 0, 0);
+          y += 4;
         }
 
-        // Alternating row colors
-        if (slotIndex % 2 === 0) {
-          doc.setFillColor(249, 250, 251);
-          doc.rect(14, y - 3, 270, 5, 'F');
-        }
+        const columns = [
+          { header: 'Time', dataKey: 'time' },
+          ...group.map(s => ({ header: s.companyName, dataKey: s.id })),
+        ];
 
-        doc.setFontSize(7);
-        doc.text(safeFormatTime(slot.startTime), 16, y);
-        suppliers.forEach((supplier, i) => {
-          const meeting = activeMeetings.find(
-            m => m.supplierId === supplier.id && m.timeSlotId === slot.id
-          );
-          const buyer = meeting ? getBuyer(meeting.buyerId) : null;
-          doc.text(buyer?.name?.substring(0, 10) || '-', 35 + i * colWidth, y);
+        const rows = daySlots.map(slot => {
+          const row: Record<string, string> = { time: safeFormatTime(slot.startTime) };
+          group.forEach(supplier => {
+            const meeting = activeMeetings.find(
+              m => m.supplierId === supplier.id && m.timeSlotId === slot.id
+            );
+            const buyer = meeting ? getBuyer(meeting.buyerId) : null;
+            row[supplier.id] = buyer?.name || '-';
+          });
+          return row;
         });
-        y += 5;
-      });
 
-      y += 8;
+        autoTable(doc, {
+          startY: y,
+          columns,
+          body: rows,
+          styles: { fontSize: 9, cellPadding: 2, overflow: 'linebreak' },
+          headStyles: { fillColor: [28, 76, 55], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+          alternateRowStyles: { fillColor: [232, 241, 237] },
+          columnStyles: { time: { cellWidth: 22, fontStyle: 'bold' } },
+          margin: { left: 10, right: 10 },
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        y = (doc as any).lastAutoTable?.finalY + 8 || y + 20;
+      }
     }
 
     addPdfFooter(doc);
@@ -323,79 +348,362 @@ export default function ExportPanel() {
     }
   };
 
+  const exportWusataSupplierPDF = async () => {
+    setExportError(null);
+    try {
+      const [images, logoDataUrl] = await Promise.all([loadWusataImages(), loadWusataLogo()]);
+      const doc = new jsPDF('portrait');
+      const pageW = doc.internal.pageSize.getWidth(); // 210mm
+      const pageH = doc.internal.pageSize.getHeight(); // 297mm
+
+      // Layout constants matching WUSATA template
+      const photoColW = 63.5; // left photo column width in mm (from template)
+      const contentX = photoColW + 6; // right content area start
+      const contentW = pageW - contentX - 10; // right content area width
+      const textColor: [number, number, number] = [70, 93, 118]; // #465D76
+      const pillColor: [number, number, number] = [51, 51, 51]; // #333333
+      const lineColor: [number, number, number] = [51, 51, 51]; // #333333
+
+      // Photo slots matching template proportions with even spacing
+      // Template ratios: 42.3, 76.9, 35.6, 73.0, 39.8 = 267.6mm total image height
+      // Page height = 297mm. With 6mm top/bottom margin and 3mm gaps: 297 - 12 - 12 = 273mm usable
+      const gap = 3;
+      const topMargin = 6;
+      const totalGaps = 4 * gap; // 4 gaps between 5 images
+      const usableH = pageH - topMargin * 2 - totalGaps;
+      const ratios = [42.3, 76.9, 35.6, 73.0, 39.8];
+      const totalRatio = ratios.reduce((a, b) => a + b, 0);
+      const heights = ratios.map(r => (r / totalRatio) * usableH);
+      const srcOrder = [1, 2, 3, 4, 0]; // image2, image3, image4, image5, image1
+
+      let slotY = topMargin;
+      const photoSlots = heights.map((h, i) => {
+        const slot = { y: slotY, h, srcIdx: srcOrder[i] };
+        slotY += h + gap;
+        return slot;
+      });
+
+      // Pre-render photos cropped to "cover" each slot at 300 DPI
+      const dpi = 11.81; // px per mm at 300 DPI
+      const croppedImagePromises = photoSlots.map(async (slot) => {
+        const imgData = images[slot.srcIdx];
+        if (!imgData) return null;
+
+        const slotWpx = Math.round(photoColW * dpi);
+        const slotHpx = Math.round(slot.h * dpi);
+        const canvas = document.createElement('canvas');
+        canvas.width = slotWpx;
+        canvas.height = slotHpx;
+        const ctx = canvas.getContext('2d')!;
+
+        const htmlImg = new Image();
+        htmlImg.src = imgData.dataUrl;
+        await new Promise<void>((resolve) => { htmlImg.onload = () => resolve(); });
+
+        // "Cover" logic: scale to fill, crop overflow from center
+        const imgAspect = htmlImg.naturalWidth / htmlImg.naturalHeight;
+        const slotAspect = slotWpx / slotHpx;
+        let sx = 0, sy = 0, sw = htmlImg.naturalWidth, sh = htmlImg.naturalHeight;
+        if (imgAspect > slotAspect) {
+          sw = htmlImg.naturalHeight * slotAspect;
+          sx = (htmlImg.naturalWidth - sw) / 2;
+        } else {
+          sh = htmlImg.naturalWidth / slotAspect;
+          sy = (htmlImg.naturalHeight - sh) / 2;
+        }
+        ctx.drawImage(htmlImg, sx, sy, sw, sh, 0, 0, slotWpx, slotHpx);
+        return canvas.toDataURL('image/jpeg', 0.95);
+      });
+
+      const croppedImages = (await Promise.all(croppedImagePromises)).filter((img): img is string => img !== null);
+
+      suppliers.forEach((supplier, supplierIndex) => {
+        if (supplierIndex > 0) {
+          doc.addPage();
+        }
+
+        // Draw left photo column — each photo in its template-matched slot
+        photoSlots.forEach((slot, i) => {
+          if (croppedImages[i]) {
+            try {
+              doc.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
+            } catch {
+              doc.setFillColor(200, 200, 200);
+              doc.rect(0, slot.y, photoColW, slot.h, 'F');
+            }
+          }
+        });
+
+        // Right content area
+        let y = 18;
+
+        // WUSATA logo (rendered from SVG)
+        try {
+          const logoW = 38;
+          const logoH = logoW * (152 / 211); // maintain SVG aspect ratio
+          doc.addImage(logoDataUrl, 'PNG', pageW - logoW - 8, 6, logoW, logoH);
+        } catch {
+          // Fallback to text if logo fails
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(70, 93, 118);
+          doc.text('WUSATA', pageW - 12, 12, { align: 'right' });
+        }
+
+        // Event name
+        doc.setFontSize(20);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textColor);
+        const eventName = eventConfig?.name || 'Meeting Schedule';
+        const nameLines = doc.splitTextToSize(eventName, contentW);
+        doc.text(nameLines, contentX, y);
+        y += nameLines.length * 8 + 2;
+
+        // Date | Location
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+        doc.text(dateRangeStr, contentX, y);
+        y += 6;
+
+        // Supplier name
+        doc.setFontSize(13);
+        doc.setFont('helvetica', 'bold');
+        const supplierLines = doc.splitTextToSize(supplier.companyName, contentW);
+        doc.text(supplierLines, contentX, y);
+        y += supplierLines.length * 5.5 + 1;
+
+        // Contact info
+        if (supplier.primaryContact?.name) {
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          doc.text(`Contact: ${supplier.primaryContact.name}${supplier.primaryContact.email ? ` (${supplier.primaryContact.email})` : ''}`, contentX, y);
+          y += 4;
+        }
+
+        // Horizontal divider
+        y += 2;
+        doc.setDrawColor(...lineColor);
+        doc.setLineWidth(0.5);
+        doc.line(contentX, y, pageW - 10, y);
+        y += 6;
+
+        // Get supplier's meetings
+        const supplierMeetings = activeMeetings.filter(m => m.supplierId === supplier.id);
+
+        // Group by day
+        for (let dayIdx = 0; dayIdx < dates.length; dayIdx++) {
+          const date = dates[dayIdx];
+          const daySlots = meetingSlots.filter(s => s.date === date);
+          const dayMeetings = supplierMeetings.filter(m =>
+            daySlots.some(s => s.id === m.timeSlotId)
+          );
+
+          // Skip days with no meetings for this supplier
+          if (dayMeetings.length === 0) continue;
+
+          // Check if we need a new page (if less than 40mm remaining)
+          if (y > pageH - 40) {
+            doc.addPage();
+            // Redraw photos on new page
+            photoSlots.forEach((slot, i) => {
+              if (croppedImages[i]) {
+                try {
+                  doc.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
+                } catch {
+                  doc.setFillColor(200, 200, 200);
+                  doc.rect(0, slot.y, photoColW, slot.h, 'F');
+                }
+              }
+            });
+            y = 15;
+          }
+
+          // DAY N pill
+          const pillX = contentX;
+          const pillW = 18;
+          const pillH = 6;
+          doc.setFillColor(...pillColor);
+          doc.roundedRect(pillX, y - 4, pillW, pillH, 3, 3, 'F');
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(255, 255, 255);
+          doc.text(`DAY ${dayIdx + 1}`, pillX + pillW / 2, y, { align: 'center' });
+
+          // Vertical line from pill
+          doc.setDrawColor(...lineColor);
+          doc.setLineWidth(0.4);
+          doc.line(pillX + pillW + 2, y - 4, pillX + pillW + 2, y + 2);
+
+          // Header text next to pill
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(...textColor);
+          const dayLabel = isMultiDay ? formatDateReadable(date) : 'B2B Meetings';
+          doc.text(dayLabel, pillX + pillW + 6, y);
+          y += 6;
+
+          // Meeting rows
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(...textColor);
+
+          for (const slot of daySlots) {
+            const meeting = dayMeetings.find(m => m.timeSlotId === slot.id);
+            if (!meeting) continue;
+
+            const buyer = getBuyer(meeting.buyerId);
+            if (!buyer) continue;
+
+            // Check page overflow
+            if (y > pageH - 20) {
+              doc.addPage();
+              photoSlots.forEach((slot, i) => {
+                if (croppedImages[i]) {
+                  try {
+                    doc.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
+                  } catch {
+                    doc.setFillColor(200, 200, 200);
+                    doc.rect(0, slot.y, photoColW, slot.h, 'F');
+                  }
+                }
+              });
+              y = 15;
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'normal');
+              doc.setTextColor(...textColor);
+            }
+
+            const timeStr = safeFormatTime(slot.startTime);
+            doc.text(timeStr, contentX + 4, y);
+            doc.text(`${buyer.name} (${buyer.organization})`, contentX + 28, y);
+            y += 5.5;
+          }
+
+          y += 4; // spacing between days
+        }
+
+        // If no meetings at all, show message
+        if (supplierMeetings.length === 0) {
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(...textColor);
+          doc.text('No meetings scheduled', contentX, y);
+          y += 8;
+        }
+
+        // Bottom divider
+        const bottomY = Math.max(y + 4, pageH - 20);
+        doc.setDrawColor(...lineColor);
+        doc.setLineWidth(0.5);
+        doc.line(contentX, bottomY, pageW - 10, bottomY);
+
+        // Footer
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textColor);
+        doc.text('wusata.org', contentX + contentW / 2, bottomY + 5, { align: 'center' });
+      });
+
+      doc.save('wusata-supplier-schedules.pdf');
+    } catch (err) {
+      console.error('WUSATA PDF export failed:', err);
+      setExportError(`WUSATA PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
   const exportExcel = () => {
     setExportError(null);
     try {
     const wb = XLSX.utils.book_new();
 
-    // Master grid sheet with professional header
-    const gridHeader = [
-      [eventConfig?.name || 'Meeting Schedule'],
-      [dateRangeStr],
-      [`Generated: ${new Date().toLocaleDateString()}`],
-      [], // Empty row
-      [isMultiDay ? 'Date' : '', 'Time', ...suppliers.map(s => s.companyName)].filter(Boolean),
-    ];
-    const gridRows = meetingSlots.map(slot => {
-      const row = [
-        safeFormatTime(slot.startTime),
-        ...suppliers.map(supplier => {
-          const meeting = activeMeetings.find(
-            m => m.supplierId === supplier.id && m.timeSlotId === slot.id
-          );
-          return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-        }),
-      ];
-      if (isMultiDay) {
-        row.unshift(formatDateReadable(slot.date));
+    // Master grid and By Supplier sheets — split by day, filter empty suppliers
+    const excelMaxCols = 7;
+    let gridSheetCount = 0;
+    let supplierSheetCount = 0;
+
+    for (const date of dates) {
+      const daySlots = meetingSlots.filter(s => s.date === date);
+      const dateLabel = isMultiDay ? formatDateReadable(date).split(',')[0] : '';
+
+      // Filter to only suppliers with meetings on this day
+      const daySuppliers = suppliers.filter(supplier =>
+        daySlots.some(slot =>
+          activeMeetings.some(m => m.supplierId === supplier.id && m.timeSlotId === slot.id)
+        )
+      );
+
+      if (daySuppliers.length === 0) continue;
+
+      // Split into groups
+      const groups: typeof suppliers[] = [];
+      for (let i = 0; i < daySuppliers.length; i += excelMaxCols) {
+        groups.push(daySuppliers.slice(i, i + excelMaxCols));
       }
-      return row;
-    });
-    const gridSheet = XLSX.utils.aoa_to_sheet([...gridHeader, ...gridRows]);
 
-    // Set column widths
-    gridSheet['!cols'] = [
-      ...(isMultiDay ? [{ wch: 18 }] : []),
-      { wch: 10 },
-      ...suppliers.map(() => ({ wch: 18 })),
-    ];
+      // Master Grid sheets
+      groups.forEach((group, groupIdx) => {
+        gridSheetCount++;
+        const sheetName = dates.length === 1 && groups.length === 1
+          ? 'Master Grid'
+          : `Grid${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
 
-    // Merge title row
-    gridSheet['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: suppliers.length + (isMultiDay ? 1 : 0) } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: suppliers.length + (isMultiDay ? 1 : 0) } },
-    ];
+        const gridHeader = [
+          [eventConfig?.name || 'Meeting Schedule'],
+          [isMultiDay ? `${formatDateReadable(date)}` : dateRangeStr],
+          [`Generated: ${new Date().toLocaleDateString()}`],
+          [],
+          ['Time', ...group.map(s => s.companyName)],
+        ];
+        const gridRows = daySlots.map(slot => [
+          safeFormatTime(slot.startTime),
+          ...group.map(supplier => {
+            const meeting = activeMeetings.find(
+              m => m.supplierId === supplier.id && m.timeSlotId === slot.id
+            );
+            return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
+          }),
+        ]);
+        const gridSheet = XLSX.utils.aoa_to_sheet([...gridHeader, ...gridRows]);
+        gridSheet['!cols'] = [
+          { wch: 10 },
+          ...group.map(s => ({ wch: Math.max(14, Math.min(28, s.companyName.length + 2)) })),
+        ];
+        gridSheet['!merges'] = [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: group.length } },
+          { s: { r: 1, c: 0 }, e: { r: 1, c: group.length } },
+        ];
+        XLSX.utils.book_append_sheet(wb, gridSheet, sheetName.substring(0, 31));
+      });
 
-    XLSX.utils.book_append_sheet(wb, gridSheet, 'Master Grid');
+      // By Supplier sheets
+      groups.forEach((group, groupIdx) => {
+        supplierSheetCount++;
+        const sheetName = dates.length === 1 && groups.length === 1
+          ? 'By Supplier'
+          : `Supplier${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
 
-    // By Supplier sheet with header
-    const supplierHeader = [
-      [eventConfig?.name || 'Meeting Schedule'],
-      ['Schedule by Supplier'],
-      [],
-      [isMultiDay ? 'Date' : '', 'Time', ...suppliers.map(s => s.companyName)].filter(Boolean),
-    ];
-    const supplierRows = meetingSlots.map(slot => {
-      const row = [
-        safeFormatTime(slot.startTime),
-        ...suppliers.map(supplier => {
-          const meeting = activeMeetings.filter(m => m.supplierId === supplier.id)
-            .find(m => m.timeSlotId === slot.id);
-          return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-        }),
-      ];
-      if (isMultiDay) {
-        row.unshift(formatDateReadable(slot.date));
-      }
-      return row;
-    });
-    const supplierSheet = XLSX.utils.aoa_to_sheet([...supplierHeader, ...supplierRows]);
-    supplierSheet['!cols'] = [
-      ...(isMultiDay ? [{ wch: 18 }] : []),
-      { wch: 10 },
-      ...suppliers.map(() => ({ wch: 18 })),
-    ];
-    XLSX.utils.book_append_sheet(wb, supplierSheet, 'By Supplier');
+        const supplierHeader = [
+          [eventConfig?.name || 'Meeting Schedule'],
+          ['Schedule by Supplier'],
+          [],
+          ['Time', ...group.map(s => s.companyName)],
+        ];
+        const supplierRows = daySlots.map(slot => [
+          safeFormatTime(slot.startTime),
+          ...group.map(supplier => {
+            const meeting = activeMeetings.filter(m => m.supplierId === supplier.id)
+              .find(m => m.timeSlotId === slot.id);
+            return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
+          }),
+        ]);
+        const supplierSheet = XLSX.utils.aoa_to_sheet([...supplierHeader, ...supplierRows]);
+        supplierSheet['!cols'] = [
+          { wch: 10 },
+          ...group.map(s => ({ wch: Math.max(14, Math.min(28, s.companyName.length + 2)) })),
+        ];
+        XLSX.utils.book_append_sheet(wb, supplierSheet, sheetName.substring(0, 31));
+      });
+    }
 
     // By Buyer sheet with header
     const buyerHeader = [
@@ -422,7 +730,7 @@ export default function ExportPanel() {
     buyerSheet['!cols'] = [
       ...(isMultiDay ? [{ wch: 18 }] : []),
       { wch: 10 },
-      ...buyers.map(() => ({ wch: 18 })),
+      ...buyers.map(b => ({ wch: Math.max(12, Math.min(25, b.name.length + 2)) })),
     ];
     XLSX.utils.book_append_sheet(wb, buyerSheet, 'By Buyer');
 
@@ -475,14 +783,37 @@ export default function ExportPanel() {
     const json = exportToJSON();
     const parsed = JSON.parse(json);
 
-    // Log what's being exported for debugging
-    console.log('[Export] Exporting project:', {
-      name: parsed.name,
-      meetingsCount: parsed.meetings?.length ?? 0,
-      timeSlotsCount: parsed.timeSlots?.length ?? 0,
+    // Validate export completeness
+    const exportInfo = {
+      name: parsed.name ?? '(missing)',
+      id: parsed.id ?? '(missing)',
+      createdAt: parsed.createdAt ?? '(missing)',
       suppliersCount: parsed.suppliers?.length ?? 0,
       buyersCount: parsed.buyers?.length ?? 0,
-    });
+      meetingsCount: parsed.meetings?.length ?? 0,
+      timeSlotsCount: parsed.timeSlots?.length ?? 0,
+      unscheduledPairsCount: parsed.unscheduledPairs?.length ?? 0,
+      hasEventConfig: !!parsed.eventConfig,
+    };
+    console.log('[Export] Exporting project:', exportInfo);
+
+    // Warn if critical data is missing
+    const warnings: string[] = [];
+    if (!parsed.id || !parsed.name || !parsed.createdAt) {
+      warnings.push('Project metadata (id/name/date) is incomplete');
+    }
+    if (!parsed.eventConfig) {
+      warnings.push('No event configuration found');
+    }
+    if (exportInfo.suppliersCount === 0) {
+      warnings.push('No suppliers in export');
+    }
+    if (exportInfo.buyersCount === 0) {
+      warnings.push('No buyers in export');
+    }
+    if (exportInfo.meetingsCount === 0 && exportInfo.timeSlotsCount > 0) {
+      warnings.push('No meetings found — generate schedule before exporting if you want to include meetings');
+    }
 
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -491,6 +822,18 @@ export default function ExportPanel() {
     a.download = `${parsed.name || 'schedule'}-backup.json`;
     a.click();
     URL.revokeObjectURL(url);
+
+    // Show export summary
+    const summary = [
+      `${exportInfo.suppliersCount} suppliers`,
+      `${exportInfo.buyersCount} buyers`,
+      `${exportInfo.meetingsCount} meetings`,
+      `${exportInfo.timeSlotsCount} time slots`,
+    ].join(', ');
+
+    if (warnings.length > 0) {
+      alert(`Backup exported with warnings:\n\n${summary}\n\nWarnings:\n- ${warnings.join('\n- ')}`);
+    }
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -503,23 +846,59 @@ export default function ExportPanel() {
         const json = event.target?.result as string;
         const parsed = JSON.parse(json);
 
-        // Show what will be imported
-        const meetingsCount = parsed.meetings?.length ?? 0;
-        const suppliersCount = parsed.suppliers?.length ?? 0;
-        const buyersCount = parsed.buyers?.length ?? 0;
+        // Validate required fields before import
+        const missingFields: string[] = [];
+        if (!parsed.id) missingFields.push('id');
+        if (!parsed.name) missingFields.push('name');
+        if (!parsed.createdAt) missingFields.push('createdAt');
+
+        // Check if it's a legacy format (no id/name/createdAt but has suppliers/eventConfig)
+        const isLegacyFormat = !parsed.id && (parsed.suppliers || parsed.eventConfig);
+
+        if (missingFields.length > 0 && !isLegacyFormat) {
+          alert(
+            `Invalid backup file. Missing required fields: ${missingFields.join(', ')}\n\n` +
+            'This file may not be a valid CDFA Hub backup. Please ensure you are importing a file exported from the "Export Backup (JSON)" button.'
+          );
+          return;
+        }
+
+        console.log('[Import] Pre-import validation:', {
+          id: parsed.id,
+          name: parsed.name,
+          isLegacyFormat,
+          suppliersCount: parsed.suppliers?.length ?? 0,
+          buyersCount: parsed.buyers?.length ?? 0,
+          meetingsCount: parsed.meetings?.length ?? 0,
+          timeSlotsCount: parsed.timeSlots?.length ?? 0,
+          unscheduledPairsCount: parsed.unscheduledPairs?.length ?? 0,
+          hasEventConfig: !!parsed.eventConfig,
+        });
 
         importFromJSON(json);
 
         // Provide detailed feedback
         const details = [
-          `${suppliersCount} suppliers`,
-          `${buyersCount} buyers`,
-          meetingsCount > 0 ? `${meetingsCount} scheduled meetings` : 'no scheduled meetings',
-        ].join(', ');
+          `${parsed.suppliers?.length ?? 0} suppliers`,
+          `${parsed.buyers?.length ?? 0} buyers`,
+          `${parsed.meetings?.length ?? 0} meetings`,
+          `${parsed.timeSlots?.length ?? 0} time slots`,
+          parsed.eventConfig ? `event: ${parsed.eventConfig.name || parsed.name}` : 'no event config',
+        ].join('\n- ');
 
-        alert(`Data imported successfully!\n\nImported: ${details}`);
-      } catch {
-        alert('Failed to import data. Invalid file format.');
+        alert(
+          `Data imported successfully!\n\n` +
+          `Project "${parsed.name || 'Imported Project'}" is now active.\n\n` +
+          `Imported:\n- ${details}`
+        );
+      } catch (err) {
+        console.error('[Import] Failed:', err);
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        alert(
+          `Failed to import data.\n\n` +
+          `Error: ${message}\n\n` +
+          'Please ensure you are importing a valid JSON backup file exported from CDFA Hub.'
+        );
       }
     };
     reader.readAsText(file);
@@ -582,6 +961,19 @@ export default function ExportPanel() {
               </button>
             </div>
 
+            {/* WUSATA Branded */}
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">WUSATA Branded</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <button
+                onClick={exportWusataSupplierPDF}
+                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-amber-500 dark:hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors"
+              >
+                <div className="text-2xl mb-2">🌾</div>
+                <div className="font-medium text-gray-900 dark:text-gray-100">WUSATA Schedules</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">PDF by supplier (branded)</div>
+              </button>
+            </div>
+
             {/* Word Exports */}
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Word Documents</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -637,6 +1029,24 @@ export default function ExportPanel() {
                 <div className="text-2xl mb-2">📘</div>
                 <div className="font-medium text-gray-900 dark:text-gray-100">Master Grid</div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">Word overview</div>
+              </button>
+
+              <button
+                onClick={async () => {
+                  if (!eventConfig) return;
+                  setExportError(null);
+                  try {
+                    await downloadSignInSheets(suppliers, eventConfig);
+                  } catch (err) {
+                    console.error('Sign-in sheet export failed:', err);
+                    setExportError(`Sign-in sheet export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                  }
+                }}
+                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+              >
+                <div className="text-2xl mb-2">📋</div>
+                <div className="font-medium text-gray-900 dark:text-gray-100">Sign-In Sheets</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">Per-day supplier check-in</div>
               </button>
             </div>
 

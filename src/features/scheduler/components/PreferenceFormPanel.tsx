@@ -14,6 +14,7 @@ import {
   downloadAllPreferenceDocsZip,
   parsePreferenceDocx,
 } from '../utils/preferenceWord';
+import { findBestBuyerMatch } from '../utils/matchBuyer';
 
 export default function PreferenceFormPanel() {
   const { suppliers, buyers, eventConfig, updateSupplier } = useSchedule();
@@ -27,6 +28,7 @@ export default function PreferenceFormPanel() {
     meetCount: number;
     excludeCount: number;
     noPrefCount: number;
+    unmatchedBuyers: number;
   }> | null>(null);
   const [parsedFiles, setParsedFiles] = useState<ParsedPreferences[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -92,11 +94,15 @@ export default function PreferenceFormPanel() {
               }
             } else {
               for (const wp of wordResult.preferences) {
-                // Match buyer by organization name
-                const buyer = buyers.find(b =>
-                  b.organization.toLowerCase() === wp.organizationName.toLowerCase()
-                  || b.name.toLowerCase() === wp.organizationName.toLowerCase()
-                );
+                // Priority 1: Match by embedded buyer ID metadata
+                let buyer = wp.buyerIdFromMeta
+                  ? buyers.find(b => b.id === wp.buyerIdFromMeta)
+                  : undefined;
+                // Priority 2: Fuzzy match by organization/contact name
+                if (!buyer) {
+                  const match = findBestBuyerMatch(buyers, wp.organizationName, wp.contactName || undefined);
+                  buyer = match ? buyers.find(b => b.id === match.id) : undefined;
+                }
                 prefs.push({
                   buyerId: buyer?.id || '',
                   buyerName: wp.organizationName,
@@ -140,6 +146,7 @@ export default function PreferenceFormPanel() {
         meetCount: p.preferences.filter(pr => pr.choice === 'meet').length,
         excludeCount: p.preferences.filter(pr => pr.choice === 'exclude').length,
         noPrefCount: p.preferences.filter(pr => pr.choice === 'no_preference').length,
+        unmatchedBuyers: p.preferences.filter(pr => !pr.buyerId && pr.choice !== 'no_preference').length,
       };
     });
     setImportResults(results);
@@ -372,6 +379,12 @@ export default function PreferenceFormPanel() {
               {importResults.some(r => !r.matched) && (
                 <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-300">
                   Unmatched suppliers will be skipped. Ensure the supplier company name matches exactly.
+                </div>
+              )}
+
+              {importResults.some(r => r.unmatchedBuyers > 0) && (
+                <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-300">
+                  Some buyer preferences couldn&apos;t be matched to buyers in the system ({importResults.reduce((sum, r) => sum + r.unmatchedBuyers, 0)} total). These preferences will be ignored.
                 </div>
               )}
 

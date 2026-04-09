@@ -218,6 +218,8 @@ export default function SchedulePanel() {
     redo,
     canUndo,
     canRedo,
+    generationProgress,
+    lastScheduleScore,
   } = useSchedule();
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -260,8 +262,6 @@ export default function SchedulePanel() {
     targetDate: string;
   } | null>(null);
 
-  // Show open slots highlighting
-  const [showOpenSlots, setShowOpenSlots] = useState(false);
 
   // Track which meeting is being moved for contextual slot highlighting
   const [movingMeetingId, setMovingMeetingId] = useState<string | null>(null);
@@ -399,6 +399,18 @@ export default function SchedulePanel() {
 
   const getBuyer = (id: string) => buyerMap.get(id);
   const getSupplier = (id: string) => supplierMap.get(id);
+
+  // Sort suppliers: those with meetings on the current day come first (most meetings → fewest)
+  const sortedSuppliers = useMemo(() => {
+    return [...suppliers].sort((a, b) => {
+      const aMeetings = meetingSlots.filter(slot => getMeetingForSlot(a.id, slot.id)).length;
+      const bMeetings = meetingSlots.filter(slot => getMeetingForSlot(b.id, slot.id)).length;
+      if (aMeetings > 0 && bMeetings === 0) return -1;
+      if (aMeetings === 0 && bMeetings > 0) return 1;
+      if (aMeetings !== bMeetings) return bMeetings - aMeetings;
+      return a.companyName.localeCompare(b.companyName);
+    });
+  }, [suppliers, meetingSlots, meetingMap]);
 
   // Drag and drop handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -601,8 +613,29 @@ export default function SchedulePanel() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               )}
-              {isGenerating ? 'Generating...' : 'Generate Schedule'}
+              {isGenerating
+                ? (generationProgress
+                  ? `Evaluating ${generationProgress.current}/${generationProgress.total}...`
+                  : 'Generating...')
+                : 'Generate Schedule'}
             </button>
+            {!isGenerating && lastScheduleScore && meetings.length > 0 && (
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                lastScheduleScore.maxConsecutiveGap <= 1
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                  : lastScheduleScore.maxConsecutiveGap <= 2
+                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                    : lastScheduleScore.maxConsecutiveGap <= 3
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                      : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+              }`}>
+                {lastScheduleScore.maxConsecutiveGap <= 1 ? 'Excellent' :
+                 lastScheduleScore.maxConsecutiveGap <= 2 ? 'Good' :
+                 lastScheduleScore.maxConsecutiveGap <= 3 ? 'Fair' : 'Gaps remain'}
+                {lastScheduleScore.candidatesEvaluated > 1 &&
+                  ` (best of ${lastScheduleScore.candidatesEvaluated})`}
+              </span>
+            )}
             {meetings.length > 0 && (
               <>
                 <button
@@ -627,17 +660,6 @@ export default function SchedulePanel() {
                   className="px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-md hover:bg-purple-200 dark:hover:bg-purple-900/50"
                 >
                   + Add Meeting
-                </button>
-                <button
-                  onClick={() => setShowOpenSlots(!showOpenSlots)}
-                  className={`px-4 py-2 rounded-md ${
-                    showOpenSlots
-                      ? 'bg-green-500 text-white hover:bg-green-600'
-                      : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
-                  }`}
-                  title="Highlight all available time slots"
-                >
-                  {showOpenSlots ? '● Hide Open Slots' : '○ Show Open Slots'}
                 </button>
                 {/* Undo/Redo buttons */}
                 <div className="flex gap-1 border-l border-gray-300 dark:border-gray-600 pl-2 ml-1">
@@ -826,7 +848,7 @@ export default function SchedulePanel() {
                     <thead>
                       <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
                         <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky left-0 bg-gray-50 dark:bg-gray-700">Time</th>
-                        {suppliers.map(s => (
+                        {sortedSuppliers.map(s => (
                           <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32">
                             {s.companyName}
                           </th>
@@ -843,11 +865,11 @@ export default function SchedulePanel() {
                             )}
                           </td>
                           {slot.isBreak ? (
-                            <td colSpan={suppliers.length} className="px-3 py-2 text-center text-yellow-700 dark:text-yellow-400">
+                            <td colSpan={sortedSuppliers.length} className="px-3 py-2 text-center text-yellow-700 dark:text-yellow-400">
                               {slot.breakName}
                             </td>
                           ) : (
-                            suppliers.map(supplier => {
+                            sortedSuppliers.map(supplier => {
                               const meeting = getMeetingForSlot(supplier.id, slot.id);
                               const buyer = meeting ? getBuyer(meeting.buyerId) : null;
                               return (
@@ -1029,7 +1051,7 @@ export default function SchedulePanel() {
                                     // Check if we're moving a meeting and if this slot is for the same supplier
                                     const isMovingContext = !!movingMeetingId && movingMeetingSlotStatus?.meeting.supplierId === supplier.id;
                                     const slotStatus = isMovingContext ? movingMeetingSlotStatus?.statusMap.get(slot.id) : null;
-                                    const showSlotHighlight = showOpenSlots || isMovingContext;
+                                    const showSlotHighlight = isMovingContext;
 
                                     return (
                                     <div className="relative">

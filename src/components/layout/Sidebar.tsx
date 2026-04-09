@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   HomeIcon,
@@ -5,13 +6,15 @@ import {
   CalendarIcon,
   CurrencyDollarIcon,
   ChevronLeftIcon,
+  ChevronDownIcon,
   XMarkIcon,
   ArrowUpTrayIcon,
   LinkIcon,
   ShieldCheckIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import { cn } from '../../lib/utils';
-import { navigationItems } from '../../config/navigation';
+import { navigationItems, utilityItems } from '../../config/navigation';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -30,7 +33,32 @@ const iconMap: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>
   'shield-check': ShieldCheckIcon,
 };
 
+function NavItem({ item, collapsed, onCloseMobile }: { item: { id: string; label: string; path: string; icon: string }; collapsed: boolean; onCloseMobile: () => void }) {
+  const Icon = iconMap[item.icon] || ClipboardDocumentListIcon;
+  return (
+    <li>
+      <NavLink
+        to={item.path}
+        onClick={onCloseMobile}
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+            collapsed && "lg:justify-center lg:px-2",
+            isActive
+              ? "bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300"
+              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
+          )
+        }
+      >
+        <Icon className="w-5 h-5 flex-shrink-0" />
+        {!collapsed && <span>{item.label}</span>}
+      </NavLink>
+    </li>
+  );
+}
+
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile }: SidebarProps) {
+  const [utilitiesOpen, setUtilitiesOpen] = useState(false);
   const mainNavItems = navigationItems.filter(item => item.section === 'main');
   const toolNavItems = navigationItems.filter(item => item.section === 'tools');
 
@@ -79,72 +107,54 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-2">
-          {/* Main section */}
-          <div className="mb-6">
-            {!collapsed && (
-              <p className="px-3 mb-2 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                Overview
-              </p>
-            )}
-            <ul className="space-y-1">
-              {mainNavItems.map((item) => {
-                const Icon = iconMap[item.icon] || HomeIcon;
-                return (
-                  <li key={item.id}>
-                    <NavLink
-                      to={item.path}
-                      onClick={onCloseMobile}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                          collapsed && "lg:justify-center lg:px-2",
-                          isActive
-                            ? "bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300"
-                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
-                        )
-                      }
-                    >
-                      <Icon className="w-5 h-5 flex-shrink-0" />
-                      {!collapsed && <span>{item.label}</span>}
-                    </NavLink>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+          {/* Main items */}
+          <ul className="space-y-1">
+            {mainNavItems.map((item) => (
+              <NavItem key={item.id} item={item} collapsed={collapsed} onCloseMobile={onCloseMobile} />
+            ))}
+          </ul>
 
-          {/* Tools section */}
-          <div>
+          {/* Tools */}
+          <div className="mt-4">
             {!collapsed && (
               <p className="px-3 mb-2 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                 Tools
               </p>
             )}
             <ul className="space-y-1">
-              {toolNavItems.map((item) => {
-                const Icon = iconMap[item.icon] || ClipboardDocumentListIcon;
-                return (
-                  <li key={item.id}>
-                    <NavLink
-                      to={item.path}
-                      onClick={onCloseMobile}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                          collapsed && "lg:justify-center lg:px-2",
-                          isActive
-                            ? "bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300"
-                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
-                        )
-                      }
-                    >
-                      <Icon className="w-5 h-5 flex-shrink-0" />
-                      {!collapsed && <span>{item.label}</span>}
-                    </NavLink>
-                  </li>
-                );
-              })}
+              {toolNavItems.map((item) => (
+                <NavItem key={item.id} item={item} collapsed={collapsed} onCloseMobile={onCloseMobile} />
+              ))}
             </ul>
+          </div>
+
+          {/* Utilities — collapsible */}
+          <div className="mt-4">
+            {collapsed ? (
+              <ul className="space-y-1">
+                {utilityItems.map((item) => (
+                  <NavItem key={item.id} item={item} collapsed={collapsed} onCloseMobile={onCloseMobile} />
+                ))}
+              </ul>
+            ) : (
+              <>
+                <button
+                  onClick={() => setUtilitiesOpen(!utilitiesOpen)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <WrenchScrewdriverIcon className="w-3.5 h-3.5" />
+                  <span>Utilities</span>
+                  <ChevronDownIcon className={cn("w-3.5 h-3.5 ml-auto transition-transform", utilitiesOpen && "rotate-180")} />
+                </button>
+                {utilitiesOpen && (
+                  <ul className="space-y-1 mt-1">
+                    {utilityItems.map((item) => (
+                      <NavItem key={item.id} item={item} collapsed={collapsed} onCloseMobile={onCloseMobile} />
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
           </div>
         </nav>
 
@@ -165,6 +175,11 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
             />
             {!collapsed && <span>Collapse</span>}
           </button>
+          {!collapsed && (
+            <div className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500">
+              Build: {new Date(__BUILD_TIMESTAMP__).toLocaleString()}
+            </div>
+          )}
         </div>
       </aside>
     </>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
 import type { PreferenceType } from '../types';
+import PreferenceFormPanel from './PreferenceFormPanel';
 
 export default function PreferencesPanel() {
   const { suppliers, buyers, updateSupplier } = useSchedule();
@@ -177,6 +178,12 @@ export default function PreferencesPanel() {
         ) : (
           <p className="text-gray-500 dark:text-gray-400">Select a supplier to configure preferences</p>
         )}
+      </div>
+
+      {/* Preference Forms section */}
+      <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Preference Forms</h3>
+        <PreferenceFormPanel />
       </div>
     </div>
   );

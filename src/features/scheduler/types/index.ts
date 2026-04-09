@@ -92,6 +92,8 @@ export interface EventConfig {
   defaultMeetingDuration: number; // in minutes
   breaks: Break[];
   schedulingStrategy: SchedulingStrategy;
+  optimizationEnabled?: boolean;  // Evaluate multiple candidates to minimize gaps (default true)
+  candidateCount?: number;        // Number of candidates to evaluate (default 10)
 }
 
 // Legacy EventConfig for migration
@@ -326,6 +328,17 @@ export interface ScheduleContextType extends ScheduleState {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+
+  // Schedule optimization
+  generationProgress: { current: number; total: number } | null;
+  lastScheduleScore: ScheduleScoreInfo | null;
+}
+
+export interface ScheduleScoreInfo {
+  totalScore: number;
+  totalMeetings: number;
+  maxConsecutiveGap: number;
+  candidatesEvaluated: number;
 }
 
 // Helper to migrate old supplier format to new

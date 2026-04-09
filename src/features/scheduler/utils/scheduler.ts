@@ -1,17 +1,20 @@
 import type { Supplier, Buyer, Meeting, TimeSlot, EventConfig } from '../types';
+import type { ScheduleScore } from './scheduleScoring';
 import { generateId, generateTimeSlots, getDateRange } from './timeUtils';
+import { generateOptimizedSchedule } from './scheduleOptimizer';
 
-interface ScheduleResult {
+export interface ScheduleResult {
   meetings: Meeting[];
   timeSlots: TimeSlot[];
   unscheduledPairs: Array<{ supplierId: string; buyerId: string }>;
+  score?: ScheduleScore;
 }
 
 /**
  * Check if a time slot falls within a supplier's available time window.
  * Returns true if the supplier has no time restrictions or the slot is within bounds.
  */
-function isSlotInSupplierWindow(slot: TimeSlot, supplier: Supplier): boolean {
+export function isSlotInSupplierWindow(slot: TimeSlot, supplier: Supplier): boolean {
   if (!supplier.availableFrom && !supplier.availableTo) return true;
 
   // Compare using HH:mm strings against the slot's start time
@@ -40,7 +43,7 @@ export function canSupplierMeetBuyer(supplier: Supplier, buyerId: string): boole
 /**
  * Build list of desired meetings based on supplier preferences
  */
-function buildDesiredMeetings(
+export function buildDesiredMeetings(
   suppliers: Supplier[],
   buyers: Buyer[]
 ): Array<{ supplierId: string; buyerId: string; priority: number }> {
@@ -248,8 +251,24 @@ function generateSpacedSchedule(
 export function generateSchedule(
   config: EventConfig,
   suppliers: Supplier[],
-  buyers: Buyer[]
+  buyers: Buyer[],
+  onProgress?: (current: number, total: number) => void
 ): ScheduleResult {
+  // Use optimized path unless explicitly disabled
+  if (config.optimizationEnabled !== false) {
+    const result = generateOptimizedSchedule(config, suppliers, buyers, {
+      candidateCount: config.candidateCount ?? 10,
+      onProgress,
+    });
+    return {
+      meetings: result.meetings,
+      timeSlots: result.timeSlots,
+      unscheduledPairs: result.unscheduledPairs,
+      score: result.score,
+    };
+  }
+
+  // Legacy unoptimized path
   const timeSlots = generateTimeSlots(config);
 
   const { meetings, unscheduledPairs } = config.schedulingStrategy === 'spaced'
