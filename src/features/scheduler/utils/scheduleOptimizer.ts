@@ -1,18 +1,43 @@
 import type { Supplier, Buyer, Meeting, TimeSlot, EventConfig } from '../types';
 import type { ScheduleScore } from './scheduleScoring';
 import { generateTimeSlots } from './timeUtils';
-import { buildDesiredMeetings } from './scheduler';
+import { buildDesiredMeetings, generateEquitableSchedule } from './scheduler';
 import { scoreSchedule, compositeScore } from './scheduleScoring';
 import { compactSchedule } from './scheduleCompaction';
 import { generateId } from './timeUtils';
 import { isSlotInSupplierWindow } from './scheduler';
-import { getDateRange } from './timeUtils';
+import { getEnabledDates } from './timeUtils';
 
 interface OptimizedScheduleResult {
   meetings: Meeting[];
   timeSlots: TimeSlot[];
   unscheduledPairs: Array<{ supplierId: string; buyerId: string }>;
   score: ScheduleScore;
+}
+
+/**
+ * Defense-in-depth check: no supplier or buyer should appear twice in the same slot.
+ * Throws so that a regression in any strategy or post-processor surfaces loudly
+ * instead of silently stacking meetings in the grid.
+ */
+function assertNoDoubleBookings(meetings: Meeting[]): void {
+  const supplierSlot = new Set<string>();
+  const buyerSlot = new Set<string>();
+  for (const m of meetings) {
+    if (m.status === 'cancelled' || m.status === 'bumped') continue;
+    const sKey = `${m.supplierId}:${m.timeSlotId}`;
+    const bKey = `${m.buyerId}:${m.timeSlotId}`;
+    if (supplierSlot.has(sKey)) {
+      console.error('[scheduler] Double-booked supplier detected', { meeting: m });
+      throw new Error(`Supplier ${m.supplierId} double-booked at slot ${m.timeSlotId}`);
+    }
+    if (buyerSlot.has(bKey)) {
+      console.error('[scheduler] Double-booked buyer detected', { meeting: m });
+      throw new Error(`Buyer ${m.buyerId} double-booked at slot ${m.timeSlotId}`);
+    }
+    supplierSlot.add(sKey);
+    buyerSlot.add(bKey);
+  }
 }
 
 /**
@@ -107,7 +132,7 @@ function runSpacedSchedule(
   const meetings: Meeting[] = [];
   const unscheduledPairs: Array<{ supplierId: string; buyerId: string }> = [];
 
-  const dates = getDateRange(config.startDate, config.endDate);
+  const dates = getEnabledDates(config);
   const slotsByDate = new Map<string, TimeSlot[]>();
   for (const date of dates) {
     slotsByDate.set(date, timeSlots.filter(s => s.date === date && !s.isBreak));
@@ -235,12 +260,16 @@ export function generateOptimizedSchedule(
     }
 
     // Run the appropriate strategy
-    const { meetings, unscheduledPairs } = config.schedulingStrategy === 'spaced'
+    const { meetings, unscheduledPairs } = config.schedulingStrategy === 'equitable'
+      ? generateEquitableSchedule(config, timeSlots, suppliers, buyers, desiredMeetings)
+      : config.schedulingStrategy === 'spaced'
       ? runSpacedSchedule(config, timeSlots, suppliers, buyers, desiredMeetings)
       : runEfficientSchedule(timeSlots, suppliers, buyers, desiredMeetings);
 
-    // Compact to minimize gaps
-    const compactedMeetings = compactSchedule(meetings, timeSlots, suppliers, buyers);
+    // Compact to minimize gaps (skip for equitable — compaction defeats the spread)
+    const compactedMeetings = config.schedulingStrategy === 'equitable'
+      ? meetings
+      : compactSchedule(meetings, timeSlots, suppliers, buyers);
 
     // Score
     const score = scoreSchedule(compactedMeetings, timeSlots, suppliers, candidateCount);
@@ -262,9 +291,12 @@ export function generateOptimizedSchedule(
 
   // Fallback (shouldn't happen, but TypeScript safety)
   if (!bestResult) {
-    const { meetings, unscheduledPairs } = config.schedulingStrategy === 'spaced'
+    const { meetings, unscheduledPairs } = config.schedulingStrategy === 'equitable'
+      ? generateEquitableSchedule(config, timeSlots, suppliers, buyers, baseDesired)
+      : config.schedulingStrategy === 'spaced'
       ? runSpacedSchedule(config, timeSlots, suppliers, buyers, baseDesired)
       : runEfficientSchedule(timeSlots, suppliers, buyers, baseDesired);
+    assertNoDoubleBookings(meetings);
     return {
       meetings,
       timeSlots,
@@ -273,5 +305,6 @@ export function generateOptimizedSchedule(
     };
   }
 
+  assertNoDoubleBookings(bestResult.meetings);
   return bestResult;
 }

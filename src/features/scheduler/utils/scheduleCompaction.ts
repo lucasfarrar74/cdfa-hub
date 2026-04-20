@@ -265,6 +265,14 @@ export function compactSchedule(
                 const ourBuyerOccupied = buyerOccupied.get(ourMeeting.buyerId)!;
                 if (ourBuyerOccupied.has(gapSlot.id)) continue;
 
+                // Prevent supplier double-booking: the incoming supplier must not
+                // already hold a different meeting at the target slot. gapSlot is
+                // unoccupied by `supplier` by construction (from findGapRuns), but
+                // the mirror side (otherSupplier at ourSlotId) is not guaranteed —
+                // without this check the swap can stack two meetings on otherSupplier.
+                if (supplierOccupied.get(otherSupplier.id)!.has(ourSlotId)) continue;
+                if (supplierOccupied.get(supplier.id)!.has(gapSlot.id)) continue;
+
                 // Check supplier windows and day constraints
                 const ourSlot = slotById.get(ourSlotId)!;
                 if (!isSlotInSupplierWindow(ourSlot, otherSupplier)) continue;
