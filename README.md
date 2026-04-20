@@ -32,7 +32,8 @@ The app will open on `http://localhost:5173` (Vite's default port).
 - `npm run dev` — start the dev server with hot reload
 - `npm run build` — type-check and build for production into `dist/`
 - `npm run preview` — serve the production build locally
-- `npm run test` — run the Vitest test suite
+- `npm run test` — run the Vitest test suite in watch mode (press `q` to quit)
+- `npx vitest run` — run the test suite once and exit (what CI uses)
 - `npm run lint` — check code for lint errors
 
 ## Environment setup
@@ -50,13 +51,17 @@ VITE_FIREBASE_APP_ID=...
 
 For solo local development, login is currently disabled. See `ENABLE_AUTH` in `src/context/AuthContext.tsx`.
 
+## Continuous integration
+
+Every push and pull request runs GitHub Actions (`.github/workflows/ci.yml`), which checks lint, tests, and the production build on Node.js 20. Failed runs show up as a red check on the commit or PR — a green check means the code is ready to deploy.
+
 ## Deployment
 
 The live site is hosted on Vercel and auto-deploys whenever the `master` branch advances on GitHub. There is no separate deploy step.
 
 Vercel configuration lives in `vercel.json`. Environment variables for the live build are set in the Vercel project dashboard (mirror the local `.env` keys).
 
-**A change isn't live until it's on `origin/master` and Vercel has picked it up.** Running it locally only verifies it works on your computer.
+**A change isn't live until it's on `origin/master` and Vercel has picked it up.** Running it locally only verifies it works on your computer. CI only surfaces failures — it does not block the Vercel deploy unless branch protection is configured on GitHub.
 
 ## Project structure
 

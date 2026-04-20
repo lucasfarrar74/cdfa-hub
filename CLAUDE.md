@@ -6,7 +6,7 @@ Guidance for AI coding agents working on this repository.
 
 CDFA Hub is a React 19 + TypeScript + Vite single-page app. It helps run supplier/buyer B2B meeting events — scheduling, budget, project management. Data lives in browser `localStorage` with optional Firebase cloud sync. There is no backend server we own; Firebase provides auth and Firestore.
 
-Deployed on Vercel, auto-deploying from `master`. No CI runs before deploy — a broken push goes straight to the live site.
+Deployed on Vercel, auto-deploying from `master`. GitHub Actions (`.github/workflows/ci.yml`) runs lint, tests, and build on every push and PR — but it surfaces failures rather than blocking the deploy, since Vercel's GitHub integration deploys whenever master advances. A failing CI run on master means the live site is probably broken.
 
 ## The user
 
@@ -51,7 +51,7 @@ Vitest is set up. Test files live as `*.test.ts` next to the code they test and 
 Run tests: `npm run test` (watch mode) or `npx vitest run` (single pass).
 
 ### Commits & PRs
-The repo on GitHub is `lucasfarrar74/cdfa-hub`. Push to `master` to deploy. No CI runs pre-merge.
+The repo on GitHub is `lucasfarrar74/cdfa-hub`. Push to `master` to deploy. CI runs on every push and PR (`.github/workflows/ci.yml`: lint, tests, build). CI failure does not block the Vercel deploy — check the Actions tab after pushing to master.
 
 ## Common pitfalls
 
