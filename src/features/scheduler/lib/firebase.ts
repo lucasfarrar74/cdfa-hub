@@ -64,7 +64,15 @@ export function getFirebaseInstances(): { db: Firestore; auth: Auth } | null {
   return { db: result.db, auth: result.auth };
 }
 
-// Anonymous authentication (fallback for standalone mode)
+// When real auth is enforced, we must NOT silently create an anonymous
+// Firebase user — doing so would satisfy ProtectedRoute's "is there a
+// user?" check and bypass the login screen, leaving the app in a weird
+// "signed in with no name" state.
+const authEnforced = import.meta.env.VITE_ENABLE_AUTH === 'true';
+
+// Anonymous authentication (fallback for standalone/solo-dev mode).
+// Returns null when real auth is enforced and no user is signed in yet —
+// callers should treat that as "cannot sync until the user signs in."
 export async function signInAnonymouslyIfNeeded(): Promise<string | null> {
   const instances = getFirebaseInstances();
   if (!instances) return null;
@@ -78,14 +86,19 @@ export async function signInAnonymouslyIfNeeded(): Promise<string | null> {
 
       if (user) {
         resolve(user.uid);
-      } else {
-        try {
-          const result = await signInAnonymously(auth);
-          resolve(result.user.uid);
-        } catch (error) {
-          console.error('Anonymous sign-in failed:', error);
-          resolve(null);
-        }
+        return;
+      }
+      if (authEnforced) {
+        // Don't create an anonymous session when real auth is required.
+        resolve(null);
+        return;
+      }
+      try {
+        const result = await signInAnonymously(auth);
+        resolve(result.user.uid);
+      } catch (error) {
+        console.error('Anonymous sign-in failed:', error);
+        resolve(null);
       }
     });
   });

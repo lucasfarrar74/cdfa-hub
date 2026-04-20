@@ -51,13 +51,14 @@ const DEFAULT_USER: AuthUser = {
 const ENABLE_AUTH = import.meta.env.VITE_ENABLE_AUTH === 'true';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Start with default user - no login required for solo development
-  const [user, setUser] = useState<AuthUser | null>(DEFAULT_USER);
-  const [idToken, setIdToken] = useState<string | null>('dev-token');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Disable Firebase check for solo development
   const isConfigured = ENABLE_AUTH && isFirebaseConfigured();
+  // When auth is enforced, start with no user and a loading state so
+  // ProtectedRoute shows a spinner rather than briefly rendering the app
+  // as "logged in as Lucas Farrar" before Firebase resolves.
+  const [user, setUser] = useState<AuthUser | null>(isConfigured ? null : DEFAULT_USER);
+  const [idToken, setIdToken] = useState<string | null>(isConfigured ? null : 'dev-token');
+  const [isLoading, setIsLoading] = useState(isConfigured);
+  const [error, setError] = useState<string | null>(null);
 
   // Convert Firebase User to AuthUser
   const toAuthUser = (firebaseUser: User | null): AuthUser | null => {
