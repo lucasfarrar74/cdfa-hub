@@ -156,7 +156,28 @@ function buildFormattingRequests(
       });
     }
 
+    // Reset backgrounds across a generous range first. Sheets' batchClear
+    // clears values but not formatting — without this reset, cell fills
+    // from an earlier Update call would linger on cells whose new content
+    // is empty, producing coloured-but-empty cells.
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: 0,
+          endRowIndex: Math.max(rowCount * 2, 500),
+          startColumnIndex: 0,
+          endColumnIndex: Math.max(colCount * 2, 50),
+        },
+        cell: {
+          userEnteredFormat: { backgroundColor: { red: 1, green: 1, blue: 1 } },
+        },
+        fields: 'userEnteredFormat.backgroundColor',
+      },
+    });
+
     // Per-cell background fills for buyer-colored meetings and header banners.
+    // Applied AFTER the blanket white so the coloured cells paint over it.
     if (sheet.cellFills?.length) {
       for (const fill of sheet.cellFills) {
         requests.push({
