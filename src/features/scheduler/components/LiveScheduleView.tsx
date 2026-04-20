@@ -35,9 +35,10 @@ function MeetingCell({
   const isCompleted = meeting.status === 'completed';
   const isDelayed = meeting.status === 'delayed' || meeting.status === 'running_late';
 
-  // Soft tinted background with stronger colored left border. Keeps the
-  // room-at-a-glance buyer coding without shouting.
-  const bg = isCompleted ? '#F9FAFB' : hexToRgba(buyerColor, 0.12);
+  // Buyer-tinted background with stronger colored left border. On a light
+  // theme, ~35% alpha lands in a comfortable mid-saturation — recognizable
+  // across a projector room without going neon.
+  const bg = isCompleted ? '#F9FAFB' : hexToRgba(buyerColor, 0.35);
   const borderColor = isDelayed ? '#DC2626' : buyerColor;
   const textColor = isCompleted ? '#9CA3AF' : '#111827';
 
