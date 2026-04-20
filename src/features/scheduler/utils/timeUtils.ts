@@ -43,9 +43,9 @@ function generateDaySlots(eventDate: string, config: EventConfig): TimeSlot[] {
   const endTime = parseTimeString(eventDate, config.endTime);
 
   // Sort breaks by start time
-  const sortedBreaks = [...config.breaks].sort((a, b) =>
-    a.startTime.localeCompare(b.startTime)
-  );
+  const sortedBreaks = [...config.breaks]
+    .filter(brk => !brk.date || brk.date === eventDate)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
   while (isBefore(currentTime, endTime)) {
     // Check if current time falls within a break (exclusive of end time to avoid infinite loop)
@@ -134,6 +134,7 @@ export function generateTimeSlots(config: EventConfig): TimeSlot[] {
   const allSlots: TimeSlot[] = [];
 
   for (const dateStr of dates) {
+    if (config.disabledDays?.includes(dateStr)) continue;
     const daySlots = generateDaySlots(dateStr, config);
     allSlots.push(...daySlots);
   }
@@ -153,6 +154,22 @@ export function formatDateReadable(dateStr: string): string {
 }
 
 /**
+ * Format a date string to a full readable format with ordinal day suffix.
+ * Returns e.g. "Friday, April 17th, 2026"
+ */
+export function formatDateFull(dateStr: string): string {
+  return format(parseISO(dateStr), 'EEEE, MMMM do, yyyy');
+}
+
+/**
+ * Format just the month and year from a date string.
+ * Returns e.g. "April 2026"
+ */
+export function formatMonthYear(dateStr: string): string {
+  return format(parseISO(dateStr), 'MMMM yyyy');
+}
+
+/**
  * Format a date range for display
  */
 export function formatDateRange(startDate: string, endDate: string): string {
@@ -160,6 +177,15 @@ export function formatDateRange(startDate: string, endDate: string): string {
     return formatDateReadable(startDate);
   }
   return `${format(parseISO(startDate), 'MMM d')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`;
+}
+
+/**
+ * Get enabled dates for an event (excluding disabled days)
+ */
+export function getEnabledDates(config: EventConfig): string[] {
+  const allDates = getDateRange(config.startDate, config.endDate);
+  if (!config.disabledDays || config.disabledDays.length === 0) return allDates;
+  return allDates.filter(d => !config.disabledDays!.includes(d));
 }
 
 /**

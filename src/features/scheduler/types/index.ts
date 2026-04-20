@@ -40,7 +40,7 @@ export interface Buyer {
 
 export type PreferenceType = 'all' | 'include' | 'exclude';
 
-export type SchedulingStrategy = 'efficient' | 'spaced';
+export type SchedulingStrategy = 'efficient' | 'spaced' | 'equitable';
 
 export interface TimeSlot {
   id: string;
@@ -80,6 +80,7 @@ export interface Break {
   name: string;
   startTime: string; // HH:mm format
   endTime: string;   // HH:mm format
+  date?: string;     // YYYY-MM-DD — when set, break applies only to this day; when undefined, applies to all enabled days
 }
 
 export interface EventConfig {
@@ -91,6 +92,7 @@ export interface EventConfig {
   endTime: string;     // HH:mm format (daily end time)
   defaultMeetingDuration: number; // in minutes
   breaks: Break[];
+  disabledDays?: string[];  // YYYY-MM-DD dates within range that should generate no time slots
   schedulingStrategy: SchedulingStrategy;
   optimizationEnabled?: boolean;  // Evaluate multiple candidates to minimize gaps (default true)
   candidateCount?: number;        // Number of candidates to evaluate (default 10)

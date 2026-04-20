@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
-import { formatTime, formatDateRange, formatDateReadable, getUniqueDatesFromSlots } from '../utils/timeUtils';
+import { formatTime, formatDateRange, formatDateReadable, formatDateFull, formatMonthYear, getUniqueDatesFromSlots } from '../utils/timeUtils';
+import { registerWusataFonts, FONT_TITLE, FONT_BODY } from '../utils/wusataFonts';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -36,6 +37,7 @@ export default function ExportPanel() {
   } = useSchedule();
 
   const [exportError, setExportError] = useState<string | null>(null);
+  const [wusataPanel, setWusataPanel] = useState<'supplier' | 'buyer' | null>(null);
 
   const getBuyer = (id: string) => buyers.find(b => b.id === id);
   const getSupplier = (id: string) => suppliers.find(s => s.id === id);
@@ -348,11 +350,14 @@ export default function ExportPanel() {
     }
   };
 
-  const exportWusataSupplierPDF = async () => {
+  const exportWusataSupplierPDF = async (supplierId?: string) => {
     setExportError(null);
     try {
+      const targetSuppliers = supplierId ? suppliers.filter(s => s.id === supplierId) : suppliers;
+      if (targetSuppliers.length === 0) return;
       const [images, logoDataUrl] = await Promise.all([loadWusataImages(), loadWusataLogo()]);
       const doc = new jsPDF('portrait');
+      await registerWusataFonts(doc);
       const pageW = doc.internal.pageSize.getWidth(); // 210mm
       const pageH = doc.internal.pageSize.getHeight(); // 297mm
 
@@ -361,7 +366,6 @@ export default function ExportPanel() {
       const contentX = photoColW + 6; // right content area start
       const contentW = pageW - contentX - 10; // right content area width
       const textColor: [number, number, number] = [70, 93, 118]; // #465D76
-      const pillColor: [number, number, number] = [51, 51, 51]; // #333333
       const lineColor: [number, number, number] = [51, 51, 51]; // #333333
 
       // Photo slots matching template proportions with even spacing
@@ -417,10 +421,12 @@ export default function ExportPanel() {
 
       const croppedImages = (await Promise.all(croppedImagePromises)).filter((img): img is string => img !== null);
 
-      suppliers.forEach((supplier, supplierIndex) => {
+      targetSuppliers.forEach((supplier, supplierIndex) => {
         if (supplierIndex > 0) {
           doc.addPage();
         }
+
+        const firstPageNum = doc.getNumberOfPages();
 
         // Draw left photo column — each photo in its template-matched slot
         photoSlots.forEach((slot, i) => {
@@ -450,33 +456,44 @@ export default function ExportPanel() {
           doc.text('WUSATA', pageW - 12, 12, { align: 'right' });
         }
 
-        // Event name
-        doc.setFontSize(20);
-        doc.setFont('helvetica', 'bold');
+        // Event name in script font
+        doc.setFontSize(24);
+        doc.setFont(FONT_TITLE, 'normal');
         doc.setTextColor(...textColor);
         const eventName = eventConfig?.name || 'Meeting Schedule';
         const nameLines = doc.splitTextToSize(eventName, contentW);
         doc.text(nameLines, contentX, y);
-        y += nameLines.length * 8 + 2;
+        y += nameLines.length * 10 + 6;
 
-        // Date | Location
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'normal');
-        doc.text(dateRangeStr, contentX, y);
-        y += 6;
+        // Month & Year
+        if (eventConfig?.startDate) {
+          doc.setFontSize(13);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.text(formatMonthYear(eventConfig.startDate), contentX, y);
+          y += 4;
+        }
 
-        // Supplier name
+        // Supplier company name
+        y += 4;
         doc.setFontSize(13);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont(FONT_BODY, 'bold');
         const supplierLines = doc.splitTextToSize(supplier.companyName, contentW);
         doc.text(supplierLines, contentX, y);
         y += supplierLines.length * 5.5 + 1;
 
-        // Contact info
+        // Primary contact name
         if (supplier.primaryContact?.name) {
-          doc.setFontSize(9);
-          doc.setFont('helvetica', 'normal');
-          doc.text(`Contact: ${supplier.primaryContact.name}${supplier.primaryContact.email ? ` (${supplier.primaryContact.email})` : ''}`, contentX, y);
+          doc.setFontSize(10);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.text(supplier.primaryContact.name, contentX, y);
+          y += 4;
+        }
+
+        // Secondary contact name
+        if (supplier.secondaryContact?.name) {
+          doc.setFontSize(10);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.text(supplier.secondaryContact.name, contentX, y);
           y += 4;
         }
 
@@ -493,9 +510,10 @@ export default function ExportPanel() {
         // Group by day
         for (let dayIdx = 0; dayIdx < dates.length; dayIdx++) {
           const date = dates[dayIdx];
-          const daySlots = meetingSlots.filter(s => s.date === date);
+          const allDaySlots = (timeSlots || []).filter(s => s.date === date);
+          const dayMeetingSlots = allDaySlots.filter(s => !s.isBreak);
           const dayMeetings = supplierMeetings.filter(m =>
-            daySlots.some(s => s.id === m.timeSlotId)
+            dayMeetingSlots.some(s => s.id === m.timeSlotId)
           );
 
           // Skip days with no meetings for this supplier
@@ -518,65 +536,70 @@ export default function ExportPanel() {
             y = 15;
           }
 
-          // DAY N pill
-          const pillX = contentX;
-          const pillW = 18;
-          const pillH = 6;
-          doc.setFillColor(...pillColor);
-          doc.roundedRect(pillX, y - 4, pillW, pillH, 3, 3, 'F');
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(255, 255, 255);
-          doc.text(`DAY ${dayIdx + 1}`, pillX + pillW / 2, y, { align: 'center' });
-
-          // Vertical line from pill
-          doc.setDrawColor(...lineColor);
-          doc.setLineWidth(0.4);
-          doc.line(pillX + pillW + 2, y - 4, pillX + pillW + 2, y + 2);
-
-          // Header text next to pill
+          // Day header — full date
           doc.setFontSize(10);
-          doc.setFont('helvetica', 'bold');
+          doc.setFont(FONT_BODY, 'bold');
           doc.setTextColor(...textColor);
-          const dayLabel = isMultiDay ? formatDateReadable(date) : 'B2B Meetings';
-          doc.text(dayLabel, pillX + pillW + 6, y);
-          y += 6;
+          const dayLabel = formatDateFull(date);
+          doc.text(dayLabel, contentX, y);
+          y += 7;
 
-          // Meeting rows
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(...textColor);
+          // Meeting and break rows
+          for (const slot of allDaySlots) {
+            // Check page overflow
+            if (y > pageH - 25) {
+              doc.addPage();
+              photoSlots.forEach((pSlot, i) => {
+                if (croppedImages[i]) {
+                  try {
+                    doc.addImage(croppedImages[i], 'JPEG', 0, pSlot.y, photoColW, pSlot.h);
+                  } catch {
+                    doc.setFillColor(200, 200, 200);
+                    doc.rect(0, pSlot.y, photoColW, pSlot.h, 'F');
+                  }
+                }
+              });
+              y = 15;
+            }
 
-          for (const slot of daySlots) {
+            if (slot.isBreak) {
+              // Break row with fill color
+              const breakH = 7;
+              doc.setFillColor(230, 235, 240);
+              doc.roundedRect(contentX, y - 4, contentW, breakH, 1.5, 1.5, 'F');
+              doc.setFontSize(9);
+              doc.setFont(FONT_BODY, 'bold');
+              doc.setTextColor(100, 110, 120);
+              const breakLabel = slot.breakName || 'Break';
+              const breakTime = `${safeFormatTime(slot.startTime)} - ${safeFormatTime(slot.endTime)}`;
+              doc.text(breakLabel, contentX + 4, y);
+              doc.text(breakTime, contentX + contentW - 4, y, { align: 'right' });
+              doc.setTextColor(...textColor);
+              y += breakH + 2;
+              continue;
+            }
+
             const meeting = dayMeetings.find(m => m.timeSlotId === slot.id);
             if (!meeting) continue;
 
             const buyer = getBuyer(meeting.buyerId);
             if (!buyer) continue;
 
-            // Check page overflow
-            if (y > pageH - 20) {
-              doc.addPage();
-              photoSlots.forEach((slot, i) => {
-                if (croppedImages[i]) {
-                  try {
-                    doc.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
-                  } catch {
-                    doc.setFillColor(200, 200, 200);
-                    doc.rect(0, slot.y, photoColW, slot.h, 'F');
-                  }
-                }
-              });
-              y = 15;
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'normal');
-              doc.setTextColor(...textColor);
-            }
-
             const timeStr = safeFormatTime(slot.startTime);
+            doc.setFontSize(10);
+            doc.setFont(FONT_BODY, 'normal');
+            doc.setTextColor(...textColor);
             doc.text(timeStr, contentX + 4, y);
-            doc.text(`${buyer.name} (${buyer.organization})`, contentX + 28, y);
-            y += 5.5;
+            doc.text(buyer.name, contentX + 28, y);
+            y += 4.5;
+
+            // Organization on second line in bold
+            doc.setFontSize(9);
+            doc.setFont(FONT_BODY, 'bold');
+            doc.text(buyer.organization, contentX + 28, y);
+            y += 5;
+
+            y += 3; // spacing between meetings
           }
 
           y += 4; // spacing between days
@@ -585,7 +608,7 @@ export default function ExportPanel() {
         // If no meetings at all, show message
         if (supplierMeetings.length === 0) {
           doc.setFontSize(11);
-          doc.setFont('helvetica', 'normal');
+          doc.setFont(FONT_BODY, 'normal');
           doc.setTextColor(...textColor);
           doc.text('No meetings scheduled', contentX, y);
           y += 8;
@@ -599,15 +622,309 @@ export default function ExportPanel() {
 
         // Footer
         doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont(FONT_BODY, 'normal');
         doc.setTextColor(...textColor);
         doc.text('wusata.org', contentX + contentW / 2, bottomY + 5, { align: 'center' });
+
+        // Add "Continued on Next Page..." on the first page
+        doc.setPage(firstPageNum);
+        doc.setFontSize(9);
+        doc.setFont(FONT_BODY, 'normal');
+        doc.setTextColor(140, 140, 140);
+        doc.text('Continued on Next Page...', contentX + contentW / 2, pageH - 8, { align: 'center' });
+        doc.setPage(doc.getNumberOfPages());
+
+        // Pad to even page count for duplex printing
+        const supplierPages = doc.getNumberOfPages() - firstPageNum + 1;
+        if (supplierPages % 2 !== 0) {
+          doc.addPage();
+          // Branded blank page — photos only
+          photoSlots.forEach((slot, i) => {
+            if (croppedImages[i]) {
+              try {
+                doc.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
+              } catch {
+                doc.setFillColor(200, 200, 200);
+                doc.rect(0, slot.y, photoColW, slot.h, 'F');
+              }
+            }
+          });
+        }
       });
 
-      doc.save('wusata-supplier-schedules.pdf');
+      const filename = supplierId
+        ? `wusata-${targetSuppliers[0].companyName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`
+        : 'wusata-supplier-schedules.pdf';
+      doc.save(filename);
     } catch (err) {
       console.error('WUSATA PDF export failed:', err);
       setExportError(`WUSATA PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
+  const exportWusataBuyerPDF = async (buyerId?: string) => {
+    setExportError(null);
+    try {
+      const targetBuyers = buyerId ? buyers.filter(b => b.id === buyerId) : buyers;
+      if (targetBuyers.length === 0) return;
+      const [images, logoDataUrl] = await Promise.all([loadWusataImages(), loadWusataLogo()]);
+      const doc = new jsPDF('portrait');
+      await registerWusataFonts(doc);
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      const photoColW = 63.5;
+      const contentX = photoColW + 6;
+      const contentW = pageW - contentX - 10;
+      const textColor: [number, number, number] = [70, 93, 118];
+      const lineColor: [number, number, number] = [51, 51, 51];
+
+      const gap = 3;
+      const topMargin = 6;
+      const totalGaps = 4 * gap;
+      const usableH = pageH - topMargin * 2 - totalGaps;
+      const ratios = [42.3, 76.9, 35.6, 73.0, 39.8];
+      const totalRatio = ratios.reduce((a, b) => a + b, 0);
+      const heights = ratios.map(r => (r / totalRatio) * usableH);
+      const srcOrder = [1, 2, 3, 4, 0];
+
+      let slotY = topMargin;
+      const photoSlots = heights.map((h, i) => {
+        const slot = { y: slotY, h, srcIdx: srcOrder[i] };
+        slotY += h + gap;
+        return slot;
+      });
+
+      const dpi = 11.81;
+      const croppedImagePromises = photoSlots.map(async (slot) => {
+        const imgData = images[slot.srcIdx];
+        if (!imgData) return null;
+        const slotWpx = Math.round(photoColW * dpi);
+        const slotHpx = Math.round(slot.h * dpi);
+        const canvas = document.createElement('canvas');
+        canvas.width = slotWpx;
+        canvas.height = slotHpx;
+        const ctx = canvas.getContext('2d')!;
+        const htmlImg = new Image();
+        htmlImg.src = imgData.dataUrl;
+        await new Promise<void>((resolve) => { htmlImg.onload = () => resolve(); });
+        const imgAspect = htmlImg.naturalWidth / htmlImg.naturalHeight;
+        const slotAspect = slotWpx / slotHpx;
+        let sx = 0, sy = 0, sw = htmlImg.naturalWidth, sh = htmlImg.naturalHeight;
+        if (imgAspect > slotAspect) {
+          sw = htmlImg.naturalHeight * slotAspect;
+          sx = (htmlImg.naturalWidth - sw) / 2;
+        } else {
+          sh = htmlImg.naturalWidth / slotAspect;
+          sy = (htmlImg.naturalHeight - sh) / 2;
+        }
+        ctx.drawImage(htmlImg, sx, sy, sw, sh, 0, 0, slotWpx, slotHpx);
+        return canvas.toDataURL('image/jpeg', 0.95);
+      });
+
+      const croppedImages = (await Promise.all(croppedImagePromises)).filter((img): img is string => img !== null);
+
+      const drawPhotos = (d: jsPDF) => {
+        photoSlots.forEach((slot, i) => {
+          if (croppedImages[i]) {
+            try {
+              d.addImage(croppedImages[i], 'JPEG', 0, slot.y, photoColW, slot.h);
+            } catch {
+              d.setFillColor(200, 200, 200);
+              d.rect(0, slot.y, photoColW, slot.h, 'F');
+            }
+          }
+        });
+      };
+
+      targetBuyers.forEach((buyer, buyerIndex) => {
+        if (buyerIndex > 0) {
+          doc.addPage();
+        }
+
+        const firstPageNum = doc.getNumberOfPages();
+
+        drawPhotos(doc);
+
+        let y = 18;
+
+        // WUSATA logo
+        try {
+          const logoW = 38;
+          const logoH = logoW * (152 / 211);
+          doc.addImage(logoDataUrl, 'PNG', pageW - logoW - 8, 6, logoW, logoH);
+        } catch {
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(70, 93, 118);
+          doc.text('WUSATA', pageW - 12, 12, { align: 'right' });
+        }
+
+        // Event name in script font
+        doc.setFontSize(24);
+        doc.setFont(FONT_TITLE, 'normal');
+        doc.setTextColor(...textColor);
+        const eventName = eventConfig?.name || 'Meeting Schedule';
+        const nameLines = doc.splitTextToSize(eventName, contentW);
+        doc.text(nameLines, contentX, y);
+        y += nameLines.length * 10 + 6;
+
+        // Month & Year
+        if (eventConfig?.startDate) {
+          doc.setFontSize(13);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.text(formatMonthYear(eventConfig.startDate), contentX, y);
+          y += 4;
+        }
+
+        // Buyer name
+        y += 4;
+        doc.setFontSize(13);
+        doc.setFont(FONT_BODY, 'bold');
+        doc.text(buyer.name, contentX, y);
+        y += 5.5;
+
+        // Buyer organization
+        if (buyer.organization) {
+          doc.setFontSize(10);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.text(buyer.organization, contentX, y);
+          y += 4;
+        }
+
+        // Horizontal divider
+        y += 2;
+        doc.setDrawColor(...lineColor);
+        doc.setLineWidth(0.5);
+        doc.line(contentX, y, pageW - 10, y);
+        y += 6;
+
+        // Get buyer's meetings
+        const buyerMeetings = activeMeetings.filter(m => m.buyerId === buyer.id);
+
+        // Group by day
+        for (let dayIdx = 0; dayIdx < dates.length; dayIdx++) {
+          const date = dates[dayIdx];
+          const allDaySlots = (timeSlots || []).filter(s => s.date === date);
+          const dayMeetingSlots = allDaySlots.filter(s => !s.isBreak);
+          const dayMeetings = buyerMeetings.filter(m =>
+            dayMeetingSlots.some(s => s.id === m.timeSlotId)
+          );
+
+          if (dayMeetings.length === 0) continue;
+
+          // Check if we need a new page
+          if (y > pageH - 40) {
+            doc.addPage();
+            drawPhotos(doc);
+            y = 15;
+          }
+
+          // Day header — full date
+          doc.setFontSize(10);
+          doc.setFont(FONT_BODY, 'bold');
+          doc.setTextColor(...textColor);
+          const dayLabel = formatDateFull(date);
+          doc.text(dayLabel, contentX, y);
+          y += 7;
+
+          // Meeting and break rows
+          for (const slot of allDaySlots) {
+            // Check page overflow
+            if (y > pageH - 25) {
+              doc.addPage();
+              drawPhotos(doc);
+              y = 15;
+            }
+
+            if (slot.isBreak) {
+              const breakH = 7;
+              doc.setFillColor(230, 235, 240);
+              doc.roundedRect(contentX, y - 4, contentW, breakH, 1.5, 1.5, 'F');
+              doc.setFontSize(9);
+              doc.setFont(FONT_BODY, 'bold');
+              doc.setTextColor(100, 110, 120);
+              const breakLabel = slot.breakName || 'Break';
+              const breakTime = `${safeFormatTime(slot.startTime)} - ${safeFormatTime(slot.endTime)}`;
+              doc.text(breakLabel, contentX + 4, y);
+              doc.text(breakTime, contentX + contentW - 4, y, { align: 'right' });
+              doc.setTextColor(...textColor);
+              y += breakH + 2;
+              continue;
+            }
+
+            const meeting = dayMeetings.find(m => m.timeSlotId === slot.id);
+            if (!meeting) continue;
+
+            const supplier = getSupplier(meeting.supplierId);
+            if (!supplier) continue;
+
+            const timeStr = safeFormatTime(slot.startTime);
+            doc.setFontSize(10);
+            doc.setFont(FONT_BODY, 'normal');
+            doc.setTextColor(...textColor);
+            doc.text(timeStr, contentX + 4, y);
+            doc.text(supplier.companyName, contentX + 28, y);
+            y += 4.5;
+
+            // Contact name on second line in bold
+            if (supplier.primaryContact?.name) {
+              doc.setFontSize(9);
+              doc.setFont(FONT_BODY, 'bold');
+              doc.text(supplier.primaryContact.name, contentX + 28, y);
+              y += 5;
+            }
+
+            y += 3;
+          }
+
+          y += 4;
+        }
+
+        // If no meetings at all
+        if (buyerMeetings.length === 0) {
+          doc.setFontSize(11);
+          doc.setFont(FONT_BODY, 'normal');
+          doc.setTextColor(...textColor);
+          doc.text('No meetings scheduled', contentX, y);
+          y += 8;
+        }
+
+        // Bottom divider
+        const bottomY = Math.max(y + 4, pageH - 20);
+        doc.setDrawColor(...lineColor);
+        doc.setLineWidth(0.5);
+        doc.line(contentX, bottomY, pageW - 10, bottomY);
+
+        // Footer
+        doc.setFontSize(9);
+        doc.setFont(FONT_BODY, 'normal');
+        doc.setTextColor(...textColor);
+        doc.text('wusata.org', contentX + contentW / 2, bottomY + 5, { align: 'center' });
+
+        // Add "Continued on Next Page..." on the first page
+        doc.setPage(firstPageNum);
+        doc.setFontSize(9);
+        doc.setFont(FONT_BODY, 'normal');
+        doc.setTextColor(140, 140, 140);
+        doc.text('Continued on Next Page...', contentX + contentW / 2, pageH - 8, { align: 'center' });
+        doc.setPage(doc.getNumberOfPages());
+
+        // Pad to even page count for duplex printing
+        const buyerPages = doc.getNumberOfPages() - firstPageNum + 1;
+        if (buyerPages % 2 !== 0) {
+          doc.addPage();
+          drawPhotos(doc);
+        }
+      });
+
+      const filename = buyerId
+        ? `wusata-${targetBuyers[0].name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}.pdf`
+        : 'wusata-buyer-schedules.pdf';
+      doc.save(filename);
+    } catch (err) {
+      console.error('WUSATA Buyer PDF export failed:', err);
+      setExportError(`WUSATA Buyer PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -965,14 +1282,78 @@ export default function ExportPanel() {
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">WUSATA Branded</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <button
-                onClick={exportWusataSupplierPDF}
-                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-amber-500 dark:hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors"
+                onClick={() => setWusataPanel(wusataPanel === 'supplier' ? null : 'supplier')}
+                className={`p-4 border-2 border-dashed rounded-lg transition-colors ${
+                  wusataPanel === 'supplier'
+                    ? 'border-amber-500 dark:border-amber-400 bg-amber-50 dark:bg-amber-900/30'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-amber-500 dark:hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+                }`}
               >
                 <div className="text-2xl mb-2">🌾</div>
-                <div className="font-medium text-gray-900 dark:text-gray-100">WUSATA Schedules</div>
+                <div className="font-medium text-gray-900 dark:text-gray-100">WUSATA Supplier Schedules</div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">PDF by supplier (branded)</div>
               </button>
+
+              <button
+                onClick={() => setWusataPanel(wusataPanel === 'buyer' ? null : 'buyer')}
+                className={`p-4 border-2 border-dashed rounded-lg transition-colors ${
+                  wusataPanel === 'buyer'
+                    ? 'border-amber-500 dark:border-amber-400 bg-amber-50 dark:bg-amber-900/30'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-amber-500 dark:hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+                }`}
+              >
+                <div className="text-2xl mb-2">🌾</div>
+                <div className="font-medium text-gray-900 dark:text-gray-100">WUSATA Buyer Schedules</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">PDF by buyer (branded)</div>
+              </button>
             </div>
+
+            {wusataPanel && (
+              <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-amber-900 dark:text-amber-200">
+                    Download {wusataPanel === 'supplier' ? 'Supplier' : 'Buyer'} Schedules
+                  </h4>
+                  <button
+                    onClick={() => setWusataPanel(null)}
+                    className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={async () => {
+                      if (wusataPanel === 'supplier') await exportWusataSupplierPDF();
+                      else await exportWusataBuyerPDF();
+                      setWusataPanel(null);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-md bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-800/60 text-amber-900 dark:text-amber-100 text-sm font-medium transition-colors"
+                  >
+                    All {wusataPanel === 'supplier' ? 'Suppliers' : 'Buyers'} (combined PDF)
+                  </button>
+                  <div className="border-t border-amber-200 dark:border-amber-700 my-2" />
+                  <div className="max-h-60 overflow-y-auto space-y-1">
+                    {(wusataPanel === 'supplier' ? suppliers : buyers).map(item => {
+                      const name = wusataPanel === 'supplier' ? (item as typeof suppliers[0]).companyName : (item as typeof buyers[0]).name;
+                      const id = item.id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={async () => {
+                            if (wusataPanel === 'supplier') await exportWusataSupplierPDF(id);
+                            else await exportWusataBuyerPDF(id);
+                          }}
+                          className="w-full text-left px-3 py-1.5 rounded-md hover:bg-amber-100 dark:hover:bg-amber-800/40 text-gray-800 dark:text-gray-200 text-sm transition-colors"
+                        >
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Word Exports */}
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Word Documents</h3>

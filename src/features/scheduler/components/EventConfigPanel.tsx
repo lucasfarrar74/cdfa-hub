@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
 import type { EventConfig, Break, SchedulingStrategy } from '../types';
-import { generateId } from '../utils/timeUtils';
+import { generateId, getDateRange } from '../utils/timeUtils';
 
 export default function EventConfigPanel() {
   const { eventConfig, setEventConfig } = useSchedule();
@@ -13,6 +13,7 @@ export default function EventConfigPanel() {
   const [endTime, setEndTime] = useState(eventConfig?.endTime || '17:00');
   const [duration, setDuration] = useState(eventConfig?.defaultMeetingDuration || 15);
   const [breaks, setBreaks] = useState<Break[]>(eventConfig?.breaks || []);
+  const [disabledDays, setDisabledDays] = useState<string[]>(eventConfig?.disabledDays || []);
   const [schedulingStrategy, setSchedulingStrategy] = useState<SchedulingStrategy>(
     eventConfig?.schedulingStrategy || 'efficient'
   );
@@ -29,17 +30,39 @@ export default function EventConfigPanel() {
       setEndTime(eventConfig.endTime);
       setDuration(eventConfig.defaultMeetingDuration);
       setBreaks(eventConfig.breaks);
+      setDisabledDays(eventConfig.disabledDays || []);
       setSchedulingStrategy(eventConfig.schedulingStrategy);
       setOptimizationEnabled(eventConfig.optimizationEnabled !== false);
     }
   }, [eventConfig]);
 
+  const eventDays = useMemo(() => {
+    if (!startDate || !endDate) return [];
+    return getDateRange(startDate, endDate || startDate);
+  }, [startDate, endDate]);
+
+  const enabledDays = useMemo(() =>
+    eventDays.filter(d => !disabledDays.includes(d)),
+  [eventDays, disabledDays]);
+
+  const isMultiDay = eventDays.length > 1;
+
+  const toggleDay = (date: string) => {
+    setDisabledDays(prev =>
+      prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
+    );
+  };
+
   const addBreak = () => {
     setBreaks([...breaks, { id: generateId(), name: 'Lunch', startTime: '12:00', endTime: '13:00' }]);
   };
 
-  const updateBreak = (id: string, field: keyof Break, value: string) => {
-    setBreaks(breaks.map(b => (b.id === id ? { ...b, [field]: value } : b)));
+  const updateBreak = (id: string, field: string, value: string) => {
+    setBreaks(breaks.map(b => {
+      if (b.id !== id) return b;
+      if (field === 'date') return { ...b, date: value || undefined };
+      return { ...b, [field]: value };
+    }));
   };
 
   const removeBreak = (id: string) => {
@@ -47,19 +70,32 @@ export default function EventConfigPanel() {
   };
 
   const handleSave = () => {
+    // Prune disabledDays and break dates that fall outside the date range
+    const validDays = new Set(eventDays);
+    const prunedDisabled = disabledDays.filter(d => validDays.has(d));
+    const prunedBreaks = breaks.map(b =>
+      b.date && !validDays.has(b.date) ? { ...b, date: undefined } : b
+    );
+
     const config: EventConfig = {
       id: eventConfig?.id || generateId(),
       name,
       startDate,
-      endDate: endDate || startDate, // Default endDate to startDate if not set
+      endDate: endDate || startDate,
       startTime,
       endTime,
       defaultMeetingDuration: duration,
-      breaks,
+      breaks: prunedBreaks,
+      disabledDays: prunedDisabled.length > 0 ? prunedDisabled : undefined,
       schedulingStrategy,
       optimizationEnabled,
     };
     setEventConfig(config);
+  };
+
+  const formatDayShort = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
   return (
@@ -86,7 +122,6 @@ export default function EventConfigPanel() {
               value={startDate}
               onChange={e => {
                 setStartDate(e.target.value);
-                // Auto-set end date if not set or if it's before new start date
                 if (!endDate || e.target.value > endDate) {
                   setEndDate(e.target.value);
                 }
@@ -151,11 +186,14 @@ export default function EventConfigPanel() {
             >
               <option value="efficient">Most Efficient Scheduling</option>
               <option value="spaced">Relatively Spaced Out Scheduling</option>
+              <option value="equitable">Equitable Coverage (Full-Day Span)</option>
             </select>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {schedulingStrategy === 'efficient'
                 ? 'Packs meetings at the beginning of each day for maximum efficiency.'
-                : 'Distributes meetings evenly across all event days to avoid front-loading.'}
+                : schedulingStrategy === 'spaced'
+                ? 'Distributes meetings evenly across all event days to avoid front-loading.'
+                : 'Ensures every company\'s meetings span the full day so no one can leave early. Meetings are spread across morning and afternoon.'}
             </p>
 
             <label className="flex items-center gap-2 mt-3 cursor-pointer">
@@ -176,6 +214,48 @@ export default function EventConfigPanel() {
         </div>
       </div>
 
+      {isMultiDay && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Day Configuration</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Uncheck days that should not have scheduled meetings (e.g., travel days, showcases).
+          </p>
+          <div className="space-y-2">
+            {eventDays.map(date => {
+              const enabled = !disabledDays.includes(date);
+              return (
+                <label
+                  key={date}
+                  className={`flex items-center gap-3 p-3 rounded-md cursor-pointer ${
+                    enabled
+                      ? 'bg-gray-50 dark:bg-gray-700'
+                      : 'bg-gray-100 dark:bg-gray-750 opacity-60'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => toggleDay(date)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-500"
+                  />
+                  <span className={`text-sm ${enabled ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400 line-through'}`}>
+                    {formatDayShort(date)}
+                  </span>
+                  {!enabled && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">No meetings</span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+          {enabledDays.length === 0 && (
+            <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
+              All days are disabled. No meetings can be scheduled.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Breaks</h2>
@@ -192,7 +272,7 @@ export default function EventConfigPanel() {
         ) : (
           <div className="space-y-3">
             {breaks.map(brk => (
-              <div key={brk.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-md">
+              <div key={brk.id} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-md flex-wrap">
                 <input
                   type="text"
                   value={brk.name}
@@ -213,6 +293,18 @@ export default function EventConfigPanel() {
                   onChange={e => updateBreak(brk.id, 'endTime', e.target.value)}
                   className="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100"
                 />
+                {isMultiDay && (
+                  <select
+                    value={brk.date || ''}
+                    onChange={e => updateBreak(brk.id, 'date', e.target.value)}
+                    className="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 text-sm"
+                  >
+                    <option value="">All days</option>
+                    {enabledDays.map(d => (
+                      <option key={d} value={d}>{formatDayShort(d)}</option>
+                    ))}
+                  </select>
+                )}
                 <button
                   onClick={() => removeBreak(brk.id)}
                   className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 ml-auto"

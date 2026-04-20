@@ -19,7 +19,7 @@ import {
 } from 'docx';
 import { saveAs } from 'file-saver';
 import type { Supplier, EventConfig } from '../types';
-import { getDateRange } from './timeUtils';
+import { getEnabledDates } from './timeUtils';
 
 // CDFA green color scheme
 const HEADER_COLOR = '1C4C37';     // CDFA Standout
@@ -105,7 +105,7 @@ export async function downloadSignInSheets(
   suppliers: Supplier[],
   eventConfig: EventConfig,
 ): Promise<void> {
-  const dates = getDateRange(eventConfig.startDate, eventConfig.endDate);
+  const dates = getEnabledDates(eventConfig);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sections: any[] = [];

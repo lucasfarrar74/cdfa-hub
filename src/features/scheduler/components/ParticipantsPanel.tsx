@@ -46,6 +46,8 @@ export default function ParticipantsPanel() {
   const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const repairFileRef = useRef<HTMLInputElement>(null);
+  const [repairResult, setRepairResult] = useState<{ updated: number; notFound: string[] } | null>(null);
 
   // Supplier form state
   const [companyName, setCompanyName] = useState('');
@@ -298,6 +300,90 @@ export default function ParticipantsPanel() {
     }
   };
 
+  // Repair contact names from Excel/CSV — only updates primaryContact.name on matching suppliers
+  const handleRepairFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const processRepairRows = (rows: Record<string, string>[]) => {
+      let updated = 0;
+      const notFound: string[] = [];
+
+      // Build lookup by normalized company name
+      const supplierMap = new Map<string, typeof suppliers[number]>();
+      for (const s of suppliers) {
+        supplierMap.set(s.companyName.toLowerCase().trim(), s);
+      }
+
+      // Group rows by company to capture primary + secondary contacts
+      const companyContacts = new Map<string, string[]>();
+      for (const row of rows) {
+        const company = (row['Company Name'] || row.company || row.Company || row.companyName || row.organization || row.Organization || '').trim();
+        const firstName = (row['First Name'] || row.firstName || '').trim();
+        const lastName = (row['Last Name'] || row.lastName || '').trim();
+        const fullName = (firstName && lastName) ? `${firstName} ${lastName}`
+          : (row.contact1_name || row.name || row.Name || row['Primary Contact'] || '').trim();
+
+        if (!company || !fullName) continue;
+
+        const key = company.toLowerCase().trim();
+        const existing = companyContacts.get(key) || [];
+        if (!existing.includes(fullName)) existing.push(fullName);
+        companyContacts.set(key, existing);
+      }
+
+      for (const [key, names] of companyContacts) {
+        const supplier = supplierMap.get(key);
+        if (!supplier) {
+          notFound.push(names[0] ? `${key}` : key);
+          continue;
+        }
+
+        const updates: Partial<typeof supplier> = {};
+        if (names[0]) {
+          updates.primaryContact = { ...supplier.primaryContact, name: names[0] };
+        }
+        if (names[1]) {
+          updates.secondaryContact = { ...(supplier.secondaryContact || { name: '' }), name: names[1] };
+        }
+        updateSupplier(supplier.id, updates);
+        updated++;
+      }
+
+      setRepairResult({ updated, notFound });
+      if (repairFileRef.current) repairFileRef.current.value = '';
+    };
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'csv') {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: result => processRepairRows(result.data as Record<string, string>[]),
+      });
+    } else {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const rawData = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[sheetName], { header: 1 }) as string[][];
+        const headerIdx = findHeaderRow(rawData);
+        const headers = rawData[headerIdx].map(h => String(h || '').trim());
+        const rows: Record<string, string>[] = rawData.slice(headerIdx + 1)
+          .filter(row => row.some(cell => cell && String(cell).trim()))
+          .map(row => {
+            const obj: Record<string, string> = {};
+            headers.forEach((h, i) => { if (h) obj[h] = String(row[i] ?? '').trim(); });
+            return obj;
+          })
+          .filter(isDataRow);
+        processRepairRows(rows);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
   // Detect header row in Excel data (array of arrays)
   const findHeaderRow = (data: string[][]): number => {
     const knownHeaders = ['company', 'company name', 'first name', 'last name', 'name', 'email', 'organization', 'phone'];
@@ -447,7 +533,38 @@ export default function ParticipantsPanel() {
                 className="hidden"
               />
             </label>
+            {activeList === 'suppliers' && suppliers.length > 0 && (
+              <label className="px-3 py-2 bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 rounded-md hover:bg-amber-200 dark:hover:bg-amber-800 text-sm cursor-pointer">
+                Repair Contact Names
+                <input
+                  ref={repairFileRef}
+                  type="file"
+                  accept=".csv,.xls,.xlsx"
+                  onChange={handleRepairFile}
+                  className="hidden"
+                />
+              </label>
+            )}
           </div>
+
+          {repairResult && (
+            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-md text-sm">
+              <div className="font-medium text-amber-800 dark:text-amber-200">
+                Repair complete: {repairResult.updated} supplier{repairResult.updated !== 1 ? 's' : ''} updated
+              </div>
+              {repairResult.notFound.length > 0 && (
+                <div className="mt-1 text-amber-700 dark:text-amber-300">
+                  Not matched ({repairResult.notFound.length}): {repairResult.notFound.join(', ')}
+                </div>
+              )}
+              <button
+                onClick={() => setRepairResult(null)}
+                className="mt-2 text-xs text-amber-600 dark:text-amber-400 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {showForm && activeList === 'suppliers' && (
             <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md space-y-4">
@@ -656,12 +773,15 @@ export default function ParticipantsPanel() {
                           <td className="py-2">
                             <div className="flex flex-wrap gap-1">
                               {eventDays.map(day => {
+                                const isDayDisabled = eventConfig?.disabledDays?.includes(day.date);
                                 const isSelected = supplier.selectedDays?.includes(day.date);
                                 const noSelection = !supplier.selectedDays || supplier.selectedDays.length === 0;
                                 return (
                                   <button
                                     key={day.date}
+                                    disabled={isDayDisabled}
                                     onClick={() => {
+                                      if (isDayDisabled) return;
                                       const current = supplier.selectedDays || [];
                                       const updated = isSelected
                                         ? current.filter(d => d !== day.date)
@@ -669,13 +789,15 @@ export default function ParticipantsPanel() {
                                       updateSupplier(supplier.id, { selectedDays: updated.length > 0 ? updated : undefined });
                                     }}
                                     className={`px-2 py-0.5 text-xs rounded-full font-medium transition-colors ${
-                                      isSelected
-                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                        : noSelection
-                                          ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50'
+                                      isDayDisabled
+                                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed line-through'
+                                        : isSelected
+                                          ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                          : noSelection
+                                            ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 opacity-50'
                                     }`}
-                                    title={`${isSelected ? 'Remove from' : 'Add to'} ${day.label}`}
+                                    title={isDayDisabled ? `${day.label} (disabled)` : `${isSelected ? 'Remove from' : 'Add to'} ${day.label}`}
                                   >
                                     {day.short}
                                   </button>
