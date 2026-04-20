@@ -41,9 +41,14 @@ const DEFAULT_USER: AuthUser = {
   photoURL: null,
 };
 
-// Set to true to enable Firebase auth, false for solo development
-// When ready for team use, change this to true
-const ENABLE_AUTH = false;
+// Auth is driven by the VITE_ENABLE_AUTH env var so the production cutover
+// doesn't require a code change. Set VITE_ENABLE_AUTH=true in the Vercel
+// project env vars (and in local .env for dev) only AFTER:
+//   1. Firestore rules are deployed (see firestore.rules / CLAUDE.md)
+//   2. Sign-in methods are enabled in the Firebase Console
+//   3. Authorized domains include the Vercel production domain
+// While unset or false, a hardcoded local user is used (solo-dev mode).
+const ENABLE_AUTH = import.meta.env.VITE_ENABLE_AUTH === 'true';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   // Start with default user - no login required for solo development

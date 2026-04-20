@@ -248,6 +248,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     isEnabled: isFirebaseEnabled,
     syncStatus,
     activeCollaborators,
+    lastSyncError,
+    reportSyncError,
     uploadProject,
     openProject,
     syncProject,
@@ -276,8 +278,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }
   }, [activeProject, syncProject, stopSync]);
 
-  // Cloud sync: Push local changes to Firebase
-  const syncChangesToCloud = useSyncProjectChanges(activeProject, syncStatus);
+  // Cloud sync: Push local changes to Firebase. Write errors are surfaced
+  // through the same lastSyncError state that read errors use.
+  const syncChangesToCloud = useSyncProjectChanges(activeProject, syncStatus, reportSyncError);
   const syncDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debounced sync function to avoid excessive Firebase writes
@@ -1144,6 +1147,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     isFirebaseEnabled,
     syncStatus,
     activeCollaborators,
+    lastSyncError,
     uploadProjectToCloud,
     openCloudProject,
     disconnectFromCloud,
@@ -1203,6 +1207,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     isFirebaseEnabled,
     syncStatus,
     activeCollaborators,
+    lastSyncError,
     uploadProjectToCloud,
     openCloudProject,
     disconnectFromCloud,

@@ -1,7 +1,24 @@
 import { useSchedule } from '../context/ScheduleContext';
+import type { SyncError } from '../types';
+
+function humanizeSyncError(err: SyncError): string {
+  if (err.code === 'permission-denied') {
+    return 'Firestore rules are blocking access. Ask the admin to deploy firestore.rules.';
+  }
+  if (err.code === 'unavailable') {
+    return 'Firestore is unreachable. Check your internet connection.';
+  }
+  if (err.code === 'unauthenticated') {
+    return 'You are not signed in. Sign in to sync changes.';
+  }
+  if (err.operation === 'open') {
+    return err.message;
+  }
+  return err.message || 'Unknown sync error.';
+}
 
 export default function SyncStatusIndicator() {
-  const { activeProject, syncStatus, activeCollaborators, isFirebaseEnabled } = useSchedule();
+  const { activeProject, syncStatus, activeCollaborators, isFirebaseEnabled, lastSyncError } = useSchedule();
 
   // Don't show anything if not a cloud project
   if (!activeProject?.isCloud || !isFirebaseEnabled) {
@@ -86,10 +103,18 @@ export default function SyncStatusIndicator() {
       {/* Sync Status */}
       <div
         className={`flex items-center gap-1.5 px-2 py-1 rounded-full ${config.bgColor} ${config.color}`}
-        title={`Status: ${config.label}`}
+        title={
+          syncStatus === 'error' && lastSyncError
+            ? humanizeSyncError(lastSyncError)
+            : `Status: ${config.label}`
+        }
       >
         {config.icon}
-        <span className="text-xs font-medium">{config.label}</span>
+        <span className="text-xs font-medium">
+          {syncStatus === 'error' && lastSyncError?.code === 'permission-denied'
+            ? 'Blocked by rules'
+            : config.label}
+        </span>
       </div>
 
       {/* Cloud indicator */}

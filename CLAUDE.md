@@ -18,7 +18,7 @@ The primary developer is a novice coder. Prefer plain language. Define technical
 A change working in `npm run dev` is not "done." The live app is the Vercel deploy, which updates when commits land on `origin/master`. Before claiming a feature is live, verify the commit is pushed.
 
 ### Dev-vs-prod auth gate
-`src/context/AuthContext.tsx` has `const ENABLE_AUTH = false`. This disables Firebase login for local solo development and substitutes a default user (`Lucas Farrar`). Production should have this `true`. Do not remove the flag; when touching auth, check which mode the code assumes.
+`src/context/AuthContext.tsx` reads `VITE_ENABLE_AUTH` from the environment. When unset or not `'true'`, the app runs in solo-dev mode with a hardcoded local user (`Lucas Farrar`). When `'true'`, Firebase auth is active and users must sign in. Set the env var to `true` in Vercel only after completing the Firebase Console checklist below.
 
 ### Scheduler correctness
 The scheduler in `src/features/scheduler/utils/` is the most complex and most-churned code. Core invariant: **no supplier or buyer may hold two active meetings in the same slot.** PR #1 fixed a case where the compaction phase could violate this. Any change to `scheduleCompaction.ts`, `scheduleOptimizer.ts`, or `scheduler.ts` must keep tests green and preserve this invariant.
@@ -68,3 +68,50 @@ The repo on GitHub is `lucasfarrar74/cdfa-hub`. Push to `master` to deploy. CI r
 3. **Data persistence**: `src/hooks/useLocalStorage.ts` and Firebase hooks in `src/lib/`
 4. **Navigation / sidebar**: `src/config/navigation.ts` and `src/components/layout/`
 5. **Types**: `src/features/scheduler/types/index.ts` for the scheduler; feature-specific folders otherwise
+
+---
+
+## Enabling collaboration (one-time setup)
+
+The app's real-time collaboration (two admins editing the same event) requires three things to be true: Firestore rules deployed, Firebase sign-in methods enabled, and `VITE_ENABLE_AUTH=true` in the environment. Miss any one and the UI will appear to work locally but teammates won't see each other's changes.
+
+### 1. Deploy Firestore security rules
+
+Rules live in `firestore.rules` at the repo root. Deploy them from a machine that has access to the Firebase project:
+
+```bash
+npx firebase-tools login
+npx firebase-tools use meeting-scheduler-c045b
+npx firebase-tools deploy --only firestore:rules
+```
+
+Re-run this any time `firestore.rules` changes. Without this step, Firestore denies all reads and writes — the app sees `permission-denied` and the sync indicator turns red with a rules-related message.
+
+### 2. Firebase Console checklist
+
+In the [Firebase Console](https://console.firebase.google.com) for project `meeting-scheduler-c045b`:
+
+- **Authentication → Sign-in methods** → enable **Google** and **Email/Password**
+- **Authentication → Settings → Authorized domains** → add the Vercel production domain (e.g. `cdfa-hub.vercel.app`) and any custom domains
+- **Firestore Database** → if not already created, create in production mode. Region `us-west1` is a reasonable default
+- Mirror the six `VITE_FIREBASE_*` env vars from local `.env` into the Vercel project dashboard (Production + Preview environments)
+
+### 3. Flip the auth switch
+
+Add `VITE_ENABLE_AUTH=true` to the Vercel production env vars, then trigger a new deploy (push any commit or use the Vercel dashboard's "Redeploy" button). Local `.env` can follow the same pattern when you want to test auth locally.
+
+### Two-browser smoke test
+
+After a change to the collaboration code, run this five-minute check:
+
+1. Browser A: sign in, create a project, click Share, copy the link.
+2. Browser B (incognito, different account): open the link. Project loads.
+3. Browser A: add a meeting → Browser B shows it within ~2 seconds.
+4. Browser B: bump the meeting → Browser A reflects the move.
+5. Both browsers show a green "Synced" indicator.
+
+If step 2 or 3 fails, check the sync indicator tooltip — it now surfaces the Firebase error code (e.g. `permission-denied` means rules weren't deployed).
+
+### Version banner
+
+Every page mounts `<NewVersionBanner>` (see `src/components/NewVersionBanner.tsx`), which polls `/version.json` every 60 seconds and prompts a refresh when the deployed build is newer than what the browser is running. This is the defense against "teammate on a stale tab" problems during live events — don't remove it.

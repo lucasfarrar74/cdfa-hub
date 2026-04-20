@@ -16,7 +16,15 @@ import {
   signInAnonymouslyIfNeeded,
   getEffectiveUserId,
 } from '../lib/firebase';
-import type { Project, SyncStatus, ActiveCollaborator } from '../types';
+import type { Project, SyncStatus, ActiveCollaborator, SyncError } from '../types';
+
+function extractSyncError(err: unknown, operation: SyncError['operation']): SyncError {
+  if (err instanceof Error) {
+    const code = (err as Error & { code?: string }).code;
+    return { message: err.message, code, operation };
+  }
+  return { message: String(err), operation };
+}
 
 // Generate a short share ID
 function generateShareId(): string {
@@ -75,6 +83,8 @@ interface UseFirebaseSyncReturn {
   isEnabled: boolean;
   syncStatus: SyncStatus;
   activeCollaborators: ActiveCollaborator[];
+  lastSyncError: SyncError | null;
+  reportSyncError: (error: SyncError | null) => void;
   uploadProject: (project: Project) => Promise<string | null>;
   openProject: (shareId: string) => Promise<Project | null>;
   syncProject: (project: Project) => void;
@@ -88,6 +98,10 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   const [isEnabled] = useState(() => isFirebaseConfigured());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaborator[]>([]);
+  const [lastSyncError, setLastSyncError] = useState<SyncError | null>(null);
+  const reportSyncError = useCallback((err: SyncError | null) => {
+    setLastSyncError(err);
+  }, []);
 
   const unsubscribeRef = useRef<Unsubscribe | null>(null);
   const presenceUnsubscribeRef = useRef<Unsubscribe | null>(null);
@@ -135,10 +149,12 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       await setDoc(projectRef, projectToFirestore(cloudProject));
 
       setSyncStatus('synced');
+      setLastSyncError(null);
       return shareId;
     } catch (error) {
       console.error('Failed to upload project:', error);
       setSyncStatus('error');
+      setLastSyncError(extractSyncError(error, 'upload'));
       onError?.(error as Error);
       return null;
     }
@@ -159,15 +175,21 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
 
       if (!projectSnap.exists()) {
         setSyncStatus('error');
+        setLastSyncError({
+          message: `No project found for share ID "${shareId}". Double-check the link.`,
+          operation: 'open',
+        });
         return null;
       }
 
       const project = firestoreToProject(projectSnap.data() as Record<string, unknown>);
       setSyncStatus('synced');
+      setLastSyncError(null);
       return project;
     } catch (error) {
       console.error('Failed to open project:', error);
       setSyncStatus('error');
+      setLastSyncError(extractSyncError(error, 'open'));
       onError?.(error as Error);
       return null;
     }
@@ -212,10 +234,12 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
         // Notify about remote update
         onProjectUpdate?.(remoteProject);
         setSyncStatus('synced');
+        setLastSyncError(null);
       },
       (error) => {
         console.error('Sync error:', error);
         setSyncStatus('error');
+        setLastSyncError(extractSyncError(error, 'listen'));
         onError?.(error);
       }
     );
@@ -311,6 +335,8 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     isEnabled,
     syncStatus,
     activeCollaborators,
+    lastSyncError,
+    reportSyncError,
     uploadProject,
     openProject,
     syncProject,
@@ -319,10 +345,13 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   };
 }
 
-// Hook to sync project changes to Firestore
+// Hook to sync project changes to Firestore.
+// onSyncResult is called with the SyncError on failure, or null on success
+// (callers can use it to clear a previous error indicator).
 export function useSyncProjectChanges(
   project: Project | null,
-  syncStatus: SyncStatus
+  syncStatus: SyncStatus,
+  onSyncResult?: (error: SyncError | null) => void,
 ): (projectData: Project) => Promise<void> {
   const syncChanges = useCallback(async (projectData: Project) => {
     if (!project?.isCloud || !project.shareId || syncStatus !== 'synced') {
@@ -349,10 +378,12 @@ export function useSyncProjectChanges(
 
       await updateDoc(projectRef, serializedData);
       console.log('[Sync] Successfully synced to cloud');
+      onSyncResult?.(null);
     } catch (error) {
       console.error('[Sync] Failed to sync changes:', error);
+      onSyncResult?.(extractSyncError(error, 'write'));
     }
-  }, [project, syncStatus]);
+  }, [project, syncStatus, onSyncResult]);
 
   return syncChanges;
 }

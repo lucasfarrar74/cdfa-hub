@@ -168,6 +168,13 @@ export interface Project {
 // Sync status for cloud projects
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
 
+// Detail about the most recent sync failure, surfaced to UI.
+export interface SyncError {
+  message: string;
+  code?: string; // Firebase FirestoreError code, e.g. 'permission-denied'
+  operation?: 'upload' | 'open' | 'listen' | 'write' | 'presence';
+}
+
 // Active collaborator info
 export interface ActiveCollaborator {
   userId: string;
@@ -334,6 +341,9 @@ export interface ScheduleContextType extends ScheduleState {
   // Schedule optimization
   generationProgress: { current: number; total: number } | null;
   lastScheduleScore: ScheduleScoreInfo | null;
+
+  // Most recent cloud-sync error (null when healthy or offline).
+  lastSyncError: SyncError | null;
 }
 
 export interface ScheduleScoreInfo {

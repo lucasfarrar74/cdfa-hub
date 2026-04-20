@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { MobileNav } from './MobileNav';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { NewVersionBanner } from '../NewVersionBanner';
 import { useSidebarState } from '../../hooks/useSidebarState';
 import { cn } from '../../lib/utils';
 
@@ -11,6 +12,7 @@ export function MainLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <NewVersionBanner />
       <Sidebar
         collapsed={collapsed}
         mobileOpen={mobileOpen}

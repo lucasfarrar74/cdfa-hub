@@ -49,7 +49,7 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 ```
 
-For solo local development, login is currently disabled. See `ENABLE_AUTH` in `src/context/AuthContext.tsx`.
+For solo local development, login is disabled by default. To enable Firebase-based collaboration (multi-user editing, shared projects), add `VITE_ENABLE_AUTH=true` to your `.env` and complete the one-time Firebase setup documented in `CLAUDE.md` → "Enabling collaboration."
 
 ## Continuous integration
 
@@ -62,6 +62,12 @@ The live site is hosted on Vercel and auto-deploys whenever the `master` branch 
 Vercel configuration lives in `vercel.json`. Environment variables for the live build are set in the Vercel project dashboard (mirror the local `.env` keys).
 
 **A change isn't live until it's on `origin/master` and Vercel has picked it up.** Running it locally only verifies it works on your computer. CI only surfaces failures — it does not block the Vercel deploy unless branch protection is configured on GitHub.
+
+## Collaboration (multi-user editing)
+
+Two admins can edit the same event live. The setup is a one-time task documented in `CLAUDE.md` → "Enabling collaboration" and involves three steps: deploy `firestore.rules`, enable sign-in methods in the Firebase Console, and set `VITE_ENABLE_AUTH=true` in Vercel.
+
+Once enabled, the "Share" dialog on any project generates a link. Anyone with the link (and a sign-in) can open the project and edits propagate in ~2 seconds. The sync indicator in the top-right turns green when connected and red with a specific error message when something is wrong. A "New version available" banner appears automatically when a teammate is running an older build than what's currently deployed — clicking Refresh picks up the latest.
 
 ## Project structure
 
