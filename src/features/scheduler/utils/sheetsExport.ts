@@ -276,11 +276,19 @@ export async function createScheduleSheet(
   };
 }
 
+// Regex for tab names we previously generated, so we can clean up orphan
+// tabs from earlier versions of the exporter on update. Matches:
+// "Master Grid", "By Supplier", "By Buyer", "All Meetings", and any tab
+// whose name starts with "Grid " or "Supplier " (the daily / column-group
+// patterns used at various points).
+const CDFA_GENERATED_TAB = /^(Master Grid|By Supplier|By Buyer|All Meetings|Grid .+|Supplier .+)$/;
+
 /**
- * Update an existing spreadsheet with new sheet data. Clears each target
- * sheet first, then re-writes values. Does not touch tabs in the sheet
- * that aren't in our `sheets` list, so manual annotations in a side tab
- * survive a refresh.
+ * Update an existing spreadsheet to match the current workbook schema:
+ *   - Orphan CDFA-generated tabs (from older export versions) are deleted.
+ *     Non-CDFA tabs (user annotations, etc.) are preserved.
+ *   - Tabs that should exist but don't are added.
+ *   - Matching tabs are cleared and re-populated with new values + formatting.
  */
 export async function updateScheduleSheet(
   sheets: WorkbookSheet[],
@@ -289,7 +297,6 @@ export async function updateScheduleSheet(
 ): Promise<void> {
   if (sheets.length === 0) return;
 
-  // Look up the current sheet IDs so we know which of ours already exist.
   type GetRes = { sheets: Array<{ properties: SheetProperties }> };
   const current = await sheetsFetch<GetRes>(
     `${SHEETS_API}/${spreadsheetId}?fields=sheets.properties`,
@@ -301,26 +308,47 @@ export async function updateScheduleSheet(
     existingIds.set(s.properties.title, s.properties.sheetId);
   }
 
-  // Create any missing sheets, then collect their ids.
+  const wantedNames = new Set(sheets.map(s => s.name));
+
+  // Clean up CDFA-generated tabs that are no longer part of the current
+  // output (e.g. old "Grid Jan 28 1" when we now produce "Grid Jan 28").
+  // Google won't let us delete ALL sheets in a spreadsheet, so we never
+  // delete the last remaining sheet — add a placeholder first if needed.
+  const orphanDeleteRequests: object[] = [];
+  for (const [name, id] of existingIds) {
+    if (!wantedNames.has(name) && CDFA_GENERATED_TAB.test(name)) {
+      orphanDeleteRequests.push({ deleteSheet: { sheetId: id } });
+    }
+  }
+
+  // Create any missing sheets first, then delete orphans — guarantees we
+  // never end up with zero sheets in the spreadsheet.
   const addRequests: object[] = [];
   for (const s of sheets) {
     if (!existingIds.has(s.name)) {
       addRequests.push({ addSheet: { properties: { title: s.name } } });
     }
   }
-  if (addRequests.length > 0) {
+
+  if (addRequests.length > 0 || orphanDeleteRequests.length > 0) {
     type BatchRes = { replies: Array<{ addSheet?: { properties: SheetProperties } }> };
     const res = await sheetsFetch<BatchRes>(
       `${SHEETS_API}/${spreadsheetId}:batchUpdate`,
       {
         method: 'POST',
-        body: JSON.stringify({ requests: addRequests }),
+        body: JSON.stringify({ requests: [...addRequests, ...orphanDeleteRequests] }),
       },
       accessToken,
     );
     for (const reply of res.replies ?? []) {
       const props = reply.addSheet?.properties;
       if (props) existingIds.set(props.title, props.sheetId);
+    }
+    // Drop orphaned IDs so later clear/format passes don't try to touch them.
+    for (const [name] of existingIds) {
+      if (!wantedNames.has(name) && CDFA_GENERATED_TAB.test(name)) {
+        existingIds.delete(name);
+      }
     }
   }
 
