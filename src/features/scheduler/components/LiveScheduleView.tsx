@@ -235,13 +235,13 @@ function LiveScheduleContent() {
           <table className="w-full border-collapse bg-white">
             <thead className="sticky top-0 bg-white z-10 shadow-sm">
               <tr>
-                <th className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-200 text-gray-900 min-w-[10rem]">
+                <th className="text-left px-4 py-4 text-2xl font-semibold border-b border-gray-200 text-gray-900 min-w-[10rem]">
                   Time
                 </th>
                 {daySuppliers.map(s => (
                   <th
                     key={s.id}
-                    className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-200 border-l border-gray-200 text-gray-900 min-w-[12rem]"
+                    className="text-left px-4 py-4 text-3xl xl:text-4xl font-bold border-b border-gray-200 border-l border-gray-200 text-gray-900 min-w-[14rem]"
                   >
                     {s.companyName}
                   </th>
