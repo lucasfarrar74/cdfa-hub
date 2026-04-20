@@ -100,6 +100,20 @@ function SchedulerContent() {
                     View Activity
                   </a>
                 )}
+                {activeProject && (
+                  <a
+                    href="/meeting-scheduler/live"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                    title="Open the live meeting matrix in a new tab for projecting"
+                  >
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h16v10H4z M8 20h8" />
+                    </svg>
+                    Projector mode
+                  </a>
+                )}
                 <ThemeToggle />
                 <KeyboardShortcutsHelp />
                 <NotificationSettings />

@@ -9,6 +9,7 @@ import { BudgetTracker } from './pages/BudgetTracker';
 import { DataImport } from './pages/DataImport';
 import { ActivityLinks } from './pages/ActivityLinks';
 import { Backup } from './pages/Backup';
+import { LiveSchedule } from './pages/LiveSchedule';
 import './index.css';
 
 // Protected route wrapper
@@ -78,6 +79,16 @@ function AppRoutes() {
           <PublicRoute>
             <LoginPage />
           </PublicRoute>
+        }
+      />
+
+      {/* Protected projector view — outside MainLayout so no app chrome shows */}
+      <Route
+        path="/meeting-scheduler/live"
+        element={
+          <ProtectedRoute>
+            <LiveSchedule />
+          </ProtectedRoute>
         }
       />
 
