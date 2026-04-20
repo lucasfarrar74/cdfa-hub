@@ -935,8 +935,6 @@ export default function ExportPanel() {
 
     // Master grid and By Supplier sheets — split by day, filter empty suppliers
     const excelMaxCols = 7;
-    let gridSheetCount = 0;
-    let supplierSheetCount = 0;
 
     for (const date of dates) {
       const daySlots = meetingSlots.filter(s => s.date === date);
@@ -959,7 +957,6 @@ export default function ExportPanel() {
 
       // Master Grid sheets
       groups.forEach((group, groupIdx) => {
-        gridSheetCount++;
         const sheetName = dates.length === 1 && groups.length === 1
           ? 'Master Grid'
           : `Grid${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
@@ -994,7 +991,6 @@ export default function ExportPanel() {
 
       // By Supplier sheets
       groups.forEach((group, groupIdx) => {
-        supplierSheetCount++;
         const sheetName = dates.length === 1 && groups.length === 1
           ? 'By Supplier'
           : `Supplier${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();

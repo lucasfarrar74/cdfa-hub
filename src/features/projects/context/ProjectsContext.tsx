@@ -1277,6 +1277,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 }
 
 // Hook to use context
+// eslint-disable-next-line react-refresh/only-export-components -- Hook colocated with Provider; splitting breaks consumer imports
 export function useProjects() {
   const context = useContext(ProjectsContext);
   if (!context) {

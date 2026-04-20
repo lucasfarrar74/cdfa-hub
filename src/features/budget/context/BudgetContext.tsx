@@ -1328,6 +1328,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Hook colocated with Provider; splitting breaks consumer imports
 export function useBudget() {
   const context = useContext(BudgetContext);
   if (!context) {

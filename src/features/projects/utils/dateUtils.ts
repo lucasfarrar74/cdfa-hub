@@ -139,13 +139,14 @@ export function generateTimeUnits(
         label = format(current, 'MMM yyyy');
         current = startOfMonth(current);
         break;
-      case 'quarter':
+      case 'quarter': {
         const quarter = Math.floor(current.getMonth() / 3);
         const quarterStart = new Date(current.getFullYear(), quarter * 3, 1);
         unitEnd = new Date(current.getFullYear(), (quarter + 1) * 3, 0);
         label = `Q${quarter + 1} ${format(quarterStart, 'yyyy')}`;
         current = quarterStart;
         break;
+      }
     }
 
     units.push({

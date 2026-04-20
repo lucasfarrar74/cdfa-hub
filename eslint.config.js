@@ -19,5 +19,26 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // React Compiler-aware rules from eslint-plugin-react-hooks v7.
+      // React Compiler is NOT enabled in this project (see vite.config.ts),
+      // so these rules flag aspirational anti-patterns that don't affect
+      // runtime behavior. Re-enable if/when the compiler is turned on.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/immutability': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+
+      // Allow underscore-prefixed names to mark intentionally unused params,
+      // variables, and catch bindings.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
   },
 ])

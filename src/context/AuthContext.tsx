@@ -174,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Hook colocated with Provider; splitting breaks consumer imports
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {

@@ -176,7 +176,7 @@ export function generatePreferenceDoc(
     // Metadata — buyer IDs for reliable round-trip matching
     new Paragraph({
       children: [new TextRun({
-        text: `[BUYER_IDS:${buyers.map(b => `${(b.organization || b.name).replace(/[|=\[\]]/g, '')}=${b.id}`).join('|')}]`,
+        text: `[BUYER_IDS:${buyers.map(b => `${(b.organization || b.name).replace(/[|=[\]]/g, '')}=${b.id}`).join('|')}]`,
         size: 4, color: 'F9FAFB', font: 'Calibri',
       })],
     }),

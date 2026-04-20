@@ -65,7 +65,7 @@ export default function Dashboard() {
         importFromJSON(content);
         setImportError(null);
         setShowDataPanel(false);
-      } catch (err) {
+      } catch (_err) {
         setImportError('Failed to import: Invalid file format');
       }
     };

@@ -1216,6 +1216,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   return <ScheduleContext.Provider value={value}>{children}</ScheduleContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Hook colocated with Provider; splitting breaks consumer imports
 export function useSchedule(): ScheduleContextType {
   const context = useContext(ScheduleContext);
   if (context === undefined) {

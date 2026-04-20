@@ -44,8 +44,10 @@ export default function ActivityDetail({ activityId, onClose, onDelete }: Activi
     updateActivity(activityId, { status: newStatus });
   };
 
-  const handleFieldChange = (field: string, value: any) => {
-    updateActivity(activityId, { [field]: value });
+  // Dynamic field dispatch — field name isn't known to TypeScript, so we
+  // widen the update object at the boundary.
+  const handleFieldChange = (field: string, value: unknown) => {
+    updateActivity(activityId, { [field]: value } as Partial<typeof activity>);
   };
 
   const getStatusColor = (status: ActivityStatus) => {

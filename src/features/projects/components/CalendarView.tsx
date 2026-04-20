@@ -55,9 +55,10 @@ export default function CalendarView() {
     switch (viewMode) {
       case 'month':
         return format(currentDate, 'MMMM yyyy');
-      case 'quarter':
+      case 'quarter': {
         const quarter = Math.floor(currentDate.getMonth() / 3) + 1;
         return `Q${quarter} ${format(currentDate, 'yyyy')}`;
+      }
       case 'year':
         return format(currentDate, 'yyyy');
     }

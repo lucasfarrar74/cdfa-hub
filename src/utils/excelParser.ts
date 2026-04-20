@@ -125,7 +125,7 @@ export function parseExcelFile(file: File): Promise<ExcelParseResult> {
 
         const sheetNames = workbook.SheetNames;
         // Prefer sheet named "Participating Companies" if it exists
-        let activeSheet = sheetNames.find(name =>
+        const activeSheet = sheetNames.find(name =>
           name.toLowerCase().includes('participat') ||
           name.toLowerCase().includes('compan')
         ) || sheetNames[0];

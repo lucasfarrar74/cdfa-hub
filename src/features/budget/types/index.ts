@@ -142,7 +142,7 @@ export interface CreateActivityInput {
   cdfa_activity_id?: string;
 }
 
-export interface UpdateActivityInput extends Partial<CreateActivityInput> {}
+export type UpdateActivityInput = Partial<CreateActivityInput>;
 
 export interface CreateExpenseInput {
   category_id: number;
@@ -166,9 +166,9 @@ export interface CreateIncomeInput {
   notes?: string;
 }
 
-export interface UpdateExpenseInput extends Partial<CreateExpenseInput> {}
+export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 
-export interface UpdateIncomeInput extends Partial<CreateIncomeInput> {}
+export type UpdateIncomeInput = Partial<CreateIncomeInput>;
 
 export interface ExpenseTemplate {
   id: number;
