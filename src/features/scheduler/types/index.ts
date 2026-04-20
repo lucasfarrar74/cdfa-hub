@@ -163,6 +163,10 @@ export interface Project {
   // Integration with CDFA Project Manager
   cdfaActivityId?: string;     // Link back to Project Manager activity
   fiscalYear?: string;         // Fiscal year for budget alignment (e.g., "FY2025-26")
+
+  // Google Sheets export
+  googleSheetsId?: string;     // Spreadsheet ID of the linked Google Sheet, if pushed
+  googleSheetsUrl?: string;    // Full URL of the linked Sheet (for display/copy)
 }
 
 // Sync status for cloud projects
@@ -316,6 +320,9 @@ export interface ScheduleContextType extends ScheduleState {
 
   // Meeting notes
   addMeetingNote: (meetingId: string, content: string) => void;
+
+  // Google Sheets export link persistence
+  setActiveProjectSheetsLink: (googleSheetsId: string, googleSheetsUrl: string) => void;
 
   // Import/Export
   exportToJSON: () => string;

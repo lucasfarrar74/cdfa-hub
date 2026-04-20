@@ -459,6 +459,19 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }));
   }, [setAppState]);
 
+  // Remember the Google Sheet the active project was pushed to, so future
+  // pushes update the same Sheet instead of creating a new one each time.
+  const setActiveProjectSheetsLink = useCallback(
+    (googleSheetsId: string, googleSheetsUrl: string) => {
+      updateActiveProject(project => ({
+        ...project,
+        googleSheetsId,
+        googleSheetsUrl,
+      }));
+    },
+    [updateActiveProject],
+  );
+
   // Event config
   const setEventConfig = useCallback((config: EventConfig) => {
     updateActiveProject(project => ({
@@ -1136,6 +1149,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     // Meeting notes
     addMeetingNote,
 
+    // Google Sheets link persistence
+    setActiveProjectSheetsLink,
+
     // Import/Export
     exportToJSON,
     importFromJSON,
@@ -1199,6 +1215,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     bumpMeetingAction,
     findNextAvailableSlotAction,
     addMeetingNote,
+    setActiveProjectSheetsLink,
     exportToJSON,
     importFromJSON,
     exportProjectToJSON,

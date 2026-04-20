@@ -115,3 +115,40 @@ If step 2 or 3 fails, check the sync indicator tooltip — it now surfaces the F
 ### Version banner
 
 Every page mounts `<NewVersionBanner>` (see `src/components/NewVersionBanner.tsx`), which polls `/version.json` every 60 seconds and prompts a refresh when the deployed build is newer than what the browser is running. This is the defense against "teammate on a stale tab" problems during live events — don't remove it.
+
+---
+
+## Enabling Google Sheets export (one-time setup)
+
+The "Push to Google Sheets" button in the Export panel creates (or updates) a Google Sheet populated with the same four tabs as the Excel export. It's intended for sharing a live-ish schedule with stakeholders who don't have app accounts. The button is inert until `VITE_GOOGLE_OAUTH_CLIENT_ID` is configured.
+
+### 1. Enable APIs
+
+In the [Google Cloud Console](https://console.cloud.google.com) for the `meeting-scheduler-c045b` project:
+- **APIs & Services → Library** → enable **Google Sheets API**
+- **APIs & Services → Library** → enable **Google Drive API** (needed to create new Sheets)
+
+### 2. Configure the OAuth consent screen
+
+- **APIs & Services → OAuth consent screen**
+- User type: **External** (unless your org has Google Workspace and you pick Internal)
+- App name: `CDFA Hub`
+- User support email + developer contact: your email
+- Scopes: add `.../auth/spreadsheets` and `.../auth/drive.file`
+- Test users: add the Google accounts of anyone who will press the button while the app is in "Testing" mode (up to 100)
+
+### 3. Create an OAuth 2.0 client ID
+
+- **APIs & Services → Credentials → Create credentials → OAuth client ID**
+- Application type: **Web application**
+- Authorized JavaScript origins: `https://cdfa-hub.vercel.app` and `http://localhost:5173` for local dev
+- Copy the client ID
+
+### 4. Wire it up
+
+- Add `VITE_GOOGLE_OAUTH_CLIENT_ID=<client-id>` to the Vercel project env vars (Production + Preview)
+- Trigger a redeploy (push any commit) so Vite picks up the new value
+
+After that, the "Push to Google Sheets" button in the Export panel becomes active. First press launches a Google consent popup; subsequent presses on the same project update the same Sheet.
+
+**Testing-mode note**: while the OAuth consent screen is in "Testing" status, only accounts listed under Test users can authorize. Move it to "In production" (Google verification required) before handing out the feature broadly.

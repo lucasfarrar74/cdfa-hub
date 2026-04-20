@@ -12,6 +12,9 @@ import {
 } from '../utils/exportWord';
 import { downloadSignInSheets } from '../utils/signInSheetWord';
 import { loadWusataImages, loadWusataLogo } from '../utils/wusataAssets';
+import { buildScheduleWorkbook } from '../utils/buildScheduleWorkbook';
+import { createScheduleSheet, updateScheduleSheet } from '../utils/sheetsExport';
+import { requestSheetsAccess, isGoogleOAuthConfigured } from '../../../lib/googleAuth';
 
 // Safe wrapper for formatTime - handles both Date objects and serialized strings
 function safeFormatTime(time: Date | string): string {
@@ -31,6 +34,8 @@ export default function ExportPanel() {
     buyers,
     meetings,
     timeSlots,
+    activeProject,
+    setActiveProjectSheetsLink,
     exportToJSON,
     importFromJSON,
     resetAllData,
@@ -38,10 +43,11 @@ export default function ExportPanel() {
 
   const [exportError, setExportError] = useState<string | null>(null);
   const [wusataPanel, setWusataPanel] = useState<'supplier' | 'buyer' | null>(null);
+  const [sheetsStatus, setSheetsStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+  const [sheetsError, setSheetsError] = useState<string | null>(null);
 
   const getBuyer = (id: string) => buyers.find(b => b.id === id);
   const getSupplier = (id: string) => suppliers.find(s => s.id === id);
-  const getSlot = (id: string) => timeSlots.find(s => s.id === id);
 
   const meetingSlots = (timeSlots || []).filter(s => !s.isBreak);
   const activeMeetings = (meetings || []).filter(m => m.status !== 'cancelled' && m.status !== 'bumped');
@@ -928,164 +934,69 @@ export default function ExportPanel() {
     }
   };
 
+  const pushToGoogleSheets = async () => {
+    setSheetsError(null);
+    setSheetsStatus('working');
+    try {
+      const workbook = buildScheduleWorkbook({
+        eventConfig,
+        suppliers,
+        buyers,
+        meetings,
+        timeSlots,
+      });
+      if (workbook.length === 0) {
+        throw new Error('No schedule to export — generate or import meetings first.');
+      }
+
+      const accessToken = await requestSheetsAccess();
+      const title = eventConfig?.name || activeProject?.name || 'Meeting Schedule';
+
+      if (activeProject?.googleSheetsId) {
+        await updateScheduleSheet(workbook, activeProject.googleSheetsId, accessToken);
+        setSheetsStatus('done');
+      } else {
+        const { spreadsheetId, spreadsheetUrl } = await createScheduleSheet(
+          workbook,
+          title,
+          accessToken,
+        );
+        setActiveProjectSheetsLink(spreadsheetId, spreadsheetUrl);
+        setSheetsStatus('done');
+      }
+    } catch (err) {
+      console.error('Google Sheets push failed:', err);
+      setSheetsError(err instanceof Error ? err.message : 'Unknown error');
+      setSheetsStatus('error');
+    }
+  };
+
   const exportExcel = () => {
     setExportError(null);
     try {
-    const wb = XLSX.utils.book_new();
-
-    // Master grid and By Supplier sheets — split by day, filter empty suppliers
-    const excelMaxCols = 7;
-
-    for (const date of dates) {
-      const daySlots = meetingSlots.filter(s => s.date === date);
-      const dateLabel = isMultiDay ? formatDateReadable(date).split(',')[0] : '';
-
-      // Filter to only suppliers with meetings on this day
-      const daySuppliers = suppliers.filter(supplier =>
-        daySlots.some(slot =>
-          activeMeetings.some(m => m.supplierId === supplier.id && m.timeSlotId === slot.id)
-        )
-      );
-
-      if (daySuppliers.length === 0) continue;
-
-      // Split into groups
-      const groups: typeof suppliers[] = [];
-      for (let i = 0; i < daySuppliers.length; i += excelMaxCols) {
-        groups.push(daySuppliers.slice(i, i + excelMaxCols));
-      }
-
-      // Master Grid sheets
-      groups.forEach((group, groupIdx) => {
-        const sheetName = dates.length === 1 && groups.length === 1
-          ? 'Master Grid'
-          : `Grid${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
-
-        const gridHeader = [
-          [eventConfig?.name || 'Meeting Schedule'],
-          [isMultiDay ? `${formatDateReadable(date)}` : dateRangeStr],
-          [`Generated: ${new Date().toLocaleDateString()}`],
-          [],
-          ['Time', ...group.map(s => s.companyName)],
-        ];
-        const gridRows = daySlots.map(slot => [
-          safeFormatTime(slot.startTime),
-          ...group.map(supplier => {
-            const meeting = activeMeetings.find(
-              m => m.supplierId === supplier.id && m.timeSlotId === slot.id
-            );
-            return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-          }),
-        ]);
-        const gridSheet = XLSX.utils.aoa_to_sheet([...gridHeader, ...gridRows]);
-        gridSheet['!cols'] = [
-          { wch: 10 },
-          ...group.map(s => ({ wch: Math.max(14, Math.min(28, s.companyName.length + 2)) })),
-        ];
-        gridSheet['!merges'] = [
-          { s: { r: 0, c: 0 }, e: { r: 0, c: group.length } },
-          { s: { r: 1, c: 0 }, e: { r: 1, c: group.length } },
-        ];
-        XLSX.utils.book_append_sheet(wb, gridSheet, sheetName.substring(0, 31));
+      const sheets = buildScheduleWorkbook({
+        eventConfig,
+        suppliers,
+        buyers,
+        meetings,
+        timeSlots,
       });
 
-      // By Supplier sheets
-      groups.forEach((group, groupIdx) => {
-        const sheetName = dates.length === 1 && groups.length === 1
-          ? 'By Supplier'
-          : `Supplier${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
-
-        const supplierHeader = [
-          [eventConfig?.name || 'Meeting Schedule'],
-          ['Schedule by Supplier'],
-          [],
-          ['Time', ...group.map(s => s.companyName)],
-        ];
-        const supplierRows = daySlots.map(slot => [
-          safeFormatTime(slot.startTime),
-          ...group.map(supplier => {
-            const meeting = activeMeetings.filter(m => m.supplierId === supplier.id)
-              .find(m => m.timeSlotId === slot.id);
-            return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-          }),
-        ]);
-        const supplierSheet = XLSX.utils.aoa_to_sheet([...supplierHeader, ...supplierRows]);
-        supplierSheet['!cols'] = [
-          { wch: 10 },
-          ...group.map(s => ({ wch: Math.max(14, Math.min(28, s.companyName.length + 2)) })),
-        ];
-        XLSX.utils.book_append_sheet(wb, supplierSheet, sheetName.substring(0, 31));
-      });
-    }
-
-    // By Buyer sheet with header
-    const buyerHeader = [
-      [eventConfig?.name || 'Meeting Schedule'],
-      ['Schedule by Buyer'],
-      [],
-      [isMultiDay ? 'Date' : '', 'Time', ...buyers.map(b => b.name)].filter(Boolean),
-    ];
-    const buyerRows = meetingSlots.map(slot => {
-      const row = [
-        safeFormatTime(slot.startTime),
-        ...buyers.map(buyer => {
-          const meeting = activeMeetings.filter(m => m.buyerId === buyer.id)
-            .find(m => m.timeSlotId === slot.id);
-          return meeting ? getSupplier(meeting.supplierId)?.companyName || '' : '';
-        }),
-      ];
-      if (isMultiDay) {
-        row.unshift(formatDateReadable(slot.date));
+      const wb = XLSX.utils.book_new();
+      for (const s of sheets) {
+        const ws = XLSX.utils.aoa_to_sheet(s.rows);
+        if (s.columnWidths) {
+          ws['!cols'] = s.columnWidths.map(wch => ({ wch }));
+        }
+        if (s.merges) {
+          ws['!merges'] = s.merges.map(m => ({
+            s: { r: m.startRow, c: m.startCol },
+            e: { r: m.endRow, c: m.endCol },
+          }));
+        }
+        XLSX.utils.book_append_sheet(wb, ws, s.name);
       }
-      return row;
-    });
-    const buyerSheet = XLSX.utils.aoa_to_sheet([...buyerHeader, ...buyerRows]);
-    buyerSheet['!cols'] = [
-      ...(isMultiDay ? [{ wch: 18 }] : []),
-      { wch: 10 },
-      ...buyers.map(b => ({ wch: Math.max(12, Math.min(25, b.name.length + 2)) })),
-    ];
-    XLSX.utils.book_append_sheet(wb, buyerSheet, 'By Buyer');
-
-    // All meetings list with detailed info
-    const meetingsHeader = [
-      [eventConfig?.name || 'Meeting Schedule'],
-      ['All Meetings Detail'],
-      [],
-    ];
-    const meetingsList = activeMeetings.map(m => {
-      const slot = getSlot(m.timeSlotId);
-      const supplier = getSupplier(m.supplierId);
-      return {
-        ...(isMultiDay ? { Date: slot ? formatDateReadable(slot.date) : '' } : {}),
-        Time: slot ? safeFormatTime(slot.startTime) : '',
-        Supplier: supplier?.companyName || '',
-        'Primary Contact': supplier?.primaryContact.name || '',
-        'Primary Email': supplier?.primaryContact.email || '',
-        'Secondary Contact': supplier?.secondaryContact?.name || '',
-        'Secondary Email': supplier?.secondaryContact?.email || '',
-        Buyer: getBuyer(m.buyerId)?.name || '',
-        Organization: getBuyer(m.buyerId)?.organization || '',
-        Status: m.status,
-      };
-    });
-    const meetingsSheet = XLSX.utils.aoa_to_sheet(meetingsHeader);
-    XLSX.utils.sheet_add_json(meetingsSheet, meetingsList, { origin: 'A4' });
-    meetingsSheet['!cols'] = [
-      ...(isMultiDay ? [{ wch: 18 }] : []),
-      { wch: 10 },
-      { wch: 20 },
-      { wch: 18 },
-      { wch: 25 },
-      { wch: 18 },
-      { wch: 25 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 12 },
-    ];
-    XLSX.utils.book_append_sheet(wb, meetingsSheet, 'All Meetings');
-
-    XLSX.writeFile(wb, 'schedule.xlsx');
+      XLSX.writeFile(wb, 'schedule.xlsx');
     } catch (err) {
       console.error('Excel export failed:', err);
       setExportError(`Excel export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -1427,18 +1338,72 @@ export default function ExportPanel() {
               </button>
             </div>
 
-            {/* Excel Export */}
+            {/* Excel + Google Sheets */}
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Spreadsheet</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
               <button
                 onClick={exportExcel}
-                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-green-500 dark:hover:border-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors"
+                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-green-500 dark:hover:border-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors text-left"
               >
                 <div className="text-2xl mb-2">📗</div>
                 <div className="font-medium text-gray-900 dark:text-gray-100">Excel Export</div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">All data in .xlsx</div>
               </button>
+
+              <button
+                onClick={pushToGoogleSheets}
+                disabled={!isGoogleOAuthConfigured() || sheetsStatus === 'working'}
+                className="p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-emerald-500 dark:hover:border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-transparent"
+                title={
+                  !isGoogleOAuthConfigured()
+                    ? 'VITE_GOOGLE_OAUTH_CLIENT_ID is not configured — see CLAUDE.md'
+                    : activeProject?.googleSheetsId
+                    ? 'Update the Google Sheet this project is linked to'
+                    : 'Create a new Google Sheet with the current schedule'
+                }
+              >
+                <div className="text-2xl mb-2">📊</div>
+                <div className="font-medium text-gray-900 dark:text-gray-100">
+                  {activeProject?.googleSheetsId ? 'Update Google Sheet' : 'Push to Google Sheets'}
+                </div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  {sheetsStatus === 'working' && 'Working…'}
+                  {sheetsStatus === 'done' && (activeProject?.googleSheetsId ? 'Sheet updated' : 'Sheet created')}
+                  {sheetsStatus === 'idle' && (isGoogleOAuthConfigured()
+                    ? 'Live-shareable spreadsheet view'
+                    : 'Needs Google OAuth setup')}
+                  {sheetsStatus === 'error' && 'Failed — hover for details'}
+                </div>
+              </button>
             </div>
+
+            {activeProject?.googleSheetsUrl && (
+              <div className="mb-3 p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-md text-sm flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0 truncate">
+                  <span className="font-medium text-emerald-800 dark:text-emerald-300">Linked Sheet: </span>
+                  <a
+                    href={activeProject.googleSheetsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-700 dark:text-emerald-400 underline truncate"
+                  >
+                    {activeProject.googleSheetsUrl}
+                  </a>
+                </div>
+                <button
+                  onClick={() => navigator.clipboard?.writeText(activeProject.googleSheetsUrl || '')}
+                  className="shrink-0 px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-800 hover:bg-emerald-200 dark:hover:bg-emerald-700 text-emerald-900 dark:text-emerald-100 rounded"
+                >
+                  Copy link
+                </button>
+              </div>
+            )}
+
+            {sheetsError && (
+              <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md text-sm">
+                {sheetsError}
+              </div>
+            )}
           </>
         )}
       </div>
