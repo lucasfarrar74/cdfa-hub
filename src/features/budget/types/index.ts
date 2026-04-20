@@ -179,6 +179,12 @@ export interface ExpenseTemplate {
   notes: string;
 }
 
+export interface CategoryBudget {
+  category_id: number;
+  activity_id: number;
+  allocated_amount: number;
+}
+
 export type BudgetStatus = 'under' | 'near' | 'over';
 export type ActivityStatus = 'planning' | 'active' | 'completed';
 export type ExpenseStatus = 'projected' | 'actual' | 'partial';

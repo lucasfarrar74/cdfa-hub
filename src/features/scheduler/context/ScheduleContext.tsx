@@ -19,6 +19,7 @@ import type {
   ConflictCheckResult,
   ConflictInfo,
   ScheduleConflictsSummary,
+  ScheduleScoreInfo,
 } from '../types';
 import { isLegacySupplier, migrateSupplier, isLegacyEventConfig, migrateEventConfig } from '../types';
 import { autoFillCancelledSlots, bumpMeetingToLaterSlot, findNextAvailableSlotAfter } from '../utils/scheduler';
@@ -210,6 +211,10 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // History tracking for undo/redo
   const historyTracker = useHistoryTracker<MeetingsSnapshot>(20);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+
+  // Schedule optimization state
+  const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null);
+  const [lastScheduleScore, setLastScheduleScore] = useState<ScheduleScoreInfo | null>(null);
 
   // Create default project if none exist
   useEffect(() => {
@@ -541,6 +546,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     if (!activeProject?.eventConfig) return;
 
     setAppState(prev => ({ ...prev, isGenerating: true }));
+    setGenerationProgress(null);
+    setLastScheduleScore(null);
 
     const worker = new Worker(
       new URL('../workers/scheduler.worker.ts', import.meta.url),
@@ -554,19 +561,47 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     });
 
     worker.onmessage = (e) => {
+      const data = e.data;
+
+      if (data.type === 'progress') {
+        setGenerationProgress({ current: data.current, total: data.total });
+        return;
+      }
+
+      if (data.type === 'error') {
+        console.error('Schedule generation error:', data.error);
+        setAppState(prev => ({ ...prev, isGenerating: false }));
+        setGenerationProgress(null);
+        worker.terminate();
+        return;
+      }
+
       updateActiveProject(project => ({
         ...project,
-        meetings: e.data.meetings,
-        timeSlots: e.data.timeSlots,
-        unscheduledPairs: e.data.unscheduledPairs,
+        meetings: data.meetings,
+        timeSlots: data.timeSlots,
+        unscheduledPairs: data.unscheduledPairs,
       }));
+
+      // Store schedule quality score if available
+      if (data.score) {
+        setLastScheduleScore({
+          totalScore: data.score.totalScore,
+          totalMeetings: data.score.totalMeetings,
+          maxConsecutiveGap: data.score.maxConsecutiveGap,
+          candidatesEvaluated: data.score.candidatesEvaluated,
+        });
+      }
+
       setAppState(prev => ({ ...prev, isGenerating: false }));
+      setGenerationProgress(null);
       worker.terminate();
     };
 
     worker.onerror = (error) => {
       console.error('Worker error:', error);
       setAppState(prev => ({ ...prev, isGenerating: false }));
+      setGenerationProgress(null);
       worker.terminate();
     };
   }, [activeProject, setAppState, updateActiveProject]);
@@ -639,6 +674,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       timeSlots: [],
       unscheduledPairs: [],
     }));
+    setLastScheduleScore(null);
   }, [saveToHistory, updateActiveProject]);
 
   // Delay handling
@@ -854,7 +890,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     try {
       const parsed = JSON.parse(json);
 
-      // Debug logging for import tracing
+      // Comprehensive debug logging for import tracing
       console.log('[Import] Parsed data:', {
         hasId: !!parsed.id,
         hasName: !!parsed.name,
@@ -863,7 +899,17 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         timeSlotsCount: parsed.timeSlots?.length ?? 0,
         suppliersCount: parsed.suppliers?.length ?? 0,
         buyersCount: parsed.buyers?.length ?? 0,
+        unscheduledPairsCount: parsed.unscheduledPairs?.length ?? 0,
+        hasEventConfig: !!parsed.eventConfig,
+        eventConfigName: parsed.eventConfig?.name,
       });
+
+      // Ensure arrays exist even if missing from export
+      if (!parsed.suppliers) parsed.suppliers = [];
+      if (!parsed.buyers) parsed.buyers = [];
+      if (!parsed.meetings) parsed.meetings = [];
+      if (!parsed.timeSlots) parsed.timeSlots = [];
+      if (!parsed.unscheduledPairs) parsed.unscheduledPairs = [];
 
       // Check if it's a Project or old ScheduleState format
       if (parsed.id && parsed.name && parsed.createdAt) {
@@ -871,9 +917,17 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         const project = restoreProjectDates(parsed as Project);
 
         console.log('[Import] Restored project:', {
+          id: project.id,
+          name: project.name,
           meetingsCount: project.meetings?.length ?? 0,
           timeSlotsCount: project.timeSlots?.length ?? 0,
+          suppliersCount: project.suppliers?.length ?? 0,
+          buyersCount: project.buyers?.length ?? 0,
         });
+
+        if (project.timeSlots.length > 0 && project.meetings.length === 0) {
+          console.warn('[Import] Project has time slots but no meetings — schedule may not have been generated before export');
+        }
 
         setAppState(prev => {
           const existingIndex = prev.projects.findIndex(p => p.id === project.id);
@@ -885,7 +939,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
             return { ...prev, projects: newProjects, activeProjectId: project.id };
           } else {
             // Add new project
-            console.log('[Import] Adding new project');
+            console.log('[Import] Adding new project, total projects:', prev.projects.length + 1);
             return {
               ...prev,
               projects: [...prev.projects, project],
@@ -897,7 +951,11 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         // Old format - migrate to project and add
         const project = migrateScheduleStateToProject(parsed);
         console.log('[Import] Migrated from old format:', {
+          id: project.id,
+          name: project.name,
           meetingsCount: project.meetings?.length ?? 0,
+          suppliersCount: project.suppliers?.length ?? 0,
+          buyersCount: project.buyers?.length ?? 0,
         });
         setAppState(prev => ({
           ...prev,
@@ -906,8 +964,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         }));
       }
     } catch (error) {
-      console.error('Failed to import JSON:', error);
-      throw new Error('Invalid JSON format');
+      console.error('[Import] Failed to import JSON:', error);
+      throw error instanceof Error ? error : new Error('Invalid JSON format');
     }
   }, [setAppState]);
 
@@ -1095,6 +1153,10 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     redo,
     canUndo: historyState.canUndo,
     canRedo: historyState.canRedo,
+
+    // Schedule optimization
+    generationProgress,
+    lastScheduleScore,
   }), [
     scheduleState,
     appState.projects,
@@ -1147,6 +1209,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     undo,
     redo,
     historyState,
+    generationProgress,
+    lastScheduleScore,
   ]);
 
   return <ScheduleContext.Provider value={value}>{children}</ScheduleContext.Provider>;

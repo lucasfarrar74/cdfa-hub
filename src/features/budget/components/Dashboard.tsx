@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useBudget } from '../context/BudgetContext';
-import type { Expense } from '../types';
+import type { Expense, ExpenseCategory } from '../types';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -69,6 +69,7 @@ export default function Dashboard({ onNavigateToActivities, onNavigateToActivity
     activities,
     allExpenses,
     cooperators,
+    categories,
     loadSampleData,
   } = useBudget();
 
@@ -112,6 +113,29 @@ export default function Dashboard({ onNavigateToActivities, onNavigateToActivity
     all.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     return all.slice(0, 10);
   }, [activities, allExpenses]);
+
+  // Cross-activity category spending breakdown
+  const categorySpending = useMemo(() => {
+    const map = new Map<number, { name: string; total: number; activityCount: number }>();
+    for (const activity of activities) {
+      const expenses = allExpenses[activity.id] || [];
+      const seenCategories = new Set<number>();
+      for (const e of expenses) {
+        const existing = map.get(e.category_id) || { name: e.category_name, total: 0, activityCount: 0 };
+        existing.total += (e.projected_amount ?? 0) + (e.actual_amount ?? 0);
+        if (!seenCategories.has(e.category_id)) {
+          existing.activityCount++;
+          seenCategories.add(e.category_id);
+        }
+        map.set(e.category_id, existing);
+      }
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1].total - a[1].total)
+      .slice(0, 8);
+  }, [activities, allExpenses]);
+
+  const CATEGORY_COLORS = ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#20c997', '#198754', '#0dcaf0'];
 
   return (
     <div className="space-y-6">
@@ -177,6 +201,54 @@ export default function Dashboard({ onNavigateToActivities, onNavigateToActivity
             </div>
             <p className="text-xl font-bold text-green-900 dark:text-green-100">{statusBreakdown.completed.count}</p>
             <p className="text-xs text-green-600 dark:text-green-400">{formatCurrency(statusBreakdown.completed.budget)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Category Spending Breakdown */}
+      {categorySpending.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Spending by Category</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Across all activities</p>
+          </div>
+          <div className="p-4">
+            {/* Horizontal bar chart */}
+            <div className="space-y-3">
+              {categorySpending.map(([catId, cat], i) => {
+                const maxTotal = categorySpending[0][1].total;
+                const pct = maxTotal > 0 ? (cat.total / maxTotal) * 100 : 0;
+                const colorIdx = categories.findIndex((c: ExpenseCategory) => c.id === catId);
+                const color = CATEGORY_COLORS[colorIdx >= 0 ? colorIdx % CATEGORY_COLORS.length : i % CATEGORY_COLORS.length];
+
+                return (
+                  <div key={catId} className="flex items-center gap-3">
+                    <div className="w-32 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{cat.name}</span>
+                      </div>
+                    </div>
+                    <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden">
+                      <div
+                        className="h-full rounded transition-all"
+                        style={{ width: `${pct}%`, backgroundColor: color }}
+                      />
+                    </div>
+                    <div className="w-24 text-right shrink-0">
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 tabular-nums">
+                        {formatCurrency(cat.total)}
+                      </span>
+                    </div>
+                    <div className="w-20 text-right shrink-0">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {cat.activityCount} {cat.activityCount === 1 ? 'activity' : 'activities'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

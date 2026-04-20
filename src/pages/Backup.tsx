@@ -19,6 +19,7 @@ interface BackupData {
   };
   projects: unknown;
   scheduler: unknown;
+  budget: unknown;
 }
 
 interface BackupStatus {
@@ -40,11 +41,12 @@ function collectBackupData(): BackupData {
     },
     projects: null,
     scheduler: null,
+    budget: null,
   };
 
   // Collect activity links
   try {
-    const activityLinks = localStorage.getItem('cdfa-activity-links');
+    const activityLinks = localStorage.getItem('cdfa-hub-activity-links');
     if (activityLinks) {
       data.hub.activityLinks = JSON.parse(activityLinks);
     }
@@ -54,7 +56,7 @@ function collectBackupData(): BackupData {
 
   // Collect projects data
   try {
-    const projects = localStorage.getItem('cdfa-hub-activities');
+    const projects = localStorage.getItem('cdfa-project-manager-data');
     if (projects) {
       data.projects = JSON.parse(projects);
     }
@@ -64,12 +66,22 @@ function collectBackupData(): BackupData {
 
   // Collect scheduler data
   try {
-    const scheduler = localStorage.getItem('cdfa-meeting-scheduler');
+    const scheduler = localStorage.getItem('meeting-scheduler-projects');
     if (scheduler) {
       data.scheduler = JSON.parse(scheduler);
     }
   } catch (e) {
     console.error('Failed to collect scheduler data:', e);
+  }
+
+  // Collect budget tracker data
+  try {
+    const budget = localStorage.getItem('cdfa-budget-tracker-data');
+    if (budget) {
+      data.budget = JSON.parse(budget);
+    }
+  } catch (e) {
+    console.error('Failed to collect budget data:', e);
   }
 
   // Collect preferences
@@ -89,17 +101,22 @@ function collectBackupData(): BackupData {
 function restoreBackupData(data: BackupData): void {
   // Restore activity links
   if (data.hub?.activityLinks) {
-    localStorage.setItem('cdfa-activity-links', JSON.stringify(data.hub.activityLinks));
+    localStorage.setItem('cdfa-hub-activity-links', JSON.stringify(data.hub.activityLinks));
   }
 
   // Restore projects data
   if (data.projects) {
-    localStorage.setItem('cdfa-hub-activities', JSON.stringify(data.projects));
+    localStorage.setItem('cdfa-project-manager-data', JSON.stringify(data.projects));
   }
 
   // Restore scheduler data
   if (data.scheduler) {
-    localStorage.setItem('cdfa-meeting-scheduler', JSON.stringify(data.scheduler));
+    localStorage.setItem('meeting-scheduler-projects', JSON.stringify(data.scheduler));
+  }
+
+  // Restore budget tracker data
+  if (data.budget) {
+    localStorage.setItem('cdfa-budget-tracker-data', JSON.stringify(data.budget));
   }
 
   // Restore preferences
@@ -397,11 +414,9 @@ export function Backup() {
           <li>- Activity links connecting tools together</li>
           <li>- Project Manager: Activities, checklists, and templates</li>
           <li>- Meeting Scheduler: Projects, meetings, and participants</li>
+          <li>- Budget Tracker: All budget data and allocations</li>
           <li>- Your theme and display preferences</li>
         </ul>
-        <p className="text-xs text-blue-600 dark:text-blue-400 mt-3">
-          Note: Budget Tracker data is stored in the cloud and is not included in local backups.
-        </p>
       </div>
     </div>
   );

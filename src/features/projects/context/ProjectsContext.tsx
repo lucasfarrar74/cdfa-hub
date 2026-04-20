@@ -68,6 +68,9 @@ type ProjectsAction =
   | { type: 'DISMISS_REMINDER'; payload: string }
   | { type: 'MARK_REMINDER_READ'; payload: string }
   | { type: 'SET_STAFF'; payload: StaffMember[] }
+  | { type: 'ADD_STAFF_MEMBER'; payload: StaffMember }
+  | { type: 'UPDATE_STAFF_MEMBER'; payload: { id: string; updates: Partial<StaffMember> } }
+  | { type: 'REMOVE_STAFF_MEMBER'; payload: string }
   | { type: 'SET_CURRENT_USER'; payload: string | null }
   | { type: 'SET_SYNC_STATUS'; payload: SyncStatus }
   | { type: 'LOAD_STATE'; payload: Partial<ProjectsState> }
@@ -173,6 +176,23 @@ function projectsReducer(state: ProjectsState, action: ProjectsAction): Projects
 
     case 'SET_STAFF':
       return { ...state, staffMembers: action.payload };
+
+    case 'ADD_STAFF_MEMBER':
+      return { ...state, staffMembers: [...state.staffMembers, action.payload] };
+
+    case 'UPDATE_STAFF_MEMBER':
+      return {
+        ...state,
+        staffMembers: state.staffMembers.map((s) =>
+          s.id === action.payload.id ? { ...s, ...action.payload.updates } : s
+        ),
+      };
+
+    case 'REMOVE_STAFF_MEMBER':
+      return {
+        ...state,
+        staffMembers: state.staffMembers.filter((s) => s.id !== action.payload),
+      };
 
     case 'SET_CURRENT_USER':
       return { ...state, currentUserId: action.payload };
@@ -293,6 +313,9 @@ interface ProjectsContextType {
 
   // Staff
   getStaffMember: (id: string) => StaffMember | undefined;
+  addStaffMember: (data: Omit<StaffMember, 'id'>) => StaffMember;
+  updateStaffMember: (id: string, updates: Partial<StaffMember>) => void;
+  removeStaffMember: (id: string) => boolean;
 
   // Persistence
   exportToJSON: () => string;
@@ -857,6 +880,34 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     [state.staffMembers]
   );
 
+  const addStaffMember = useCallback(
+    (data: Omit<StaffMember, 'id'>): StaffMember => {
+      const member: StaffMember = { id: uuidv4(), ...data };
+      dispatch({ type: 'ADD_STAFF_MEMBER', payload: member });
+      return member;
+    },
+    []
+  );
+
+  const updateStaffMember = useCallback(
+    (id: string, updates: Partial<StaffMember>) => {
+      dispatch({ type: 'UPDATE_STAFF_MEMBER', payload: { id, updates } });
+    },
+    []
+  );
+
+  const removeStaffMember = useCallback(
+    (id: string): boolean => {
+      const hasAssignments = state.activities.some(
+        (a) => a.leadStaffId === id || a.teamMemberIds?.includes(id)
+      );
+      if (hasAssignments) return false;
+      dispatch({ type: 'REMOVE_STAFF_MEMBER', payload: id });
+      return true;
+    },
+    [state.activities]
+  );
+
   // Export/Import
   const exportToJSON = useCallback(() => {
     return JSON.stringify({
@@ -1041,6 +1092,24 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
     dispatch({ type: 'SET_ACTIVITIES', payload: sampleActivities });
 
+    // Seed sample staff members
+    const sampleStaff: StaffMember[] = [
+      { id: uuidv4(), name: 'Lucas Farrar', email: 'lfarrar@cdfa.ca.gov', role: 'admin', isActive: true },
+      { id: uuidv4(), name: 'Maria Chen', email: 'mchen@cdfa.ca.gov', role: 'manager', isActive: true },
+      { id: uuidv4(), name: 'James Rivera', email: 'jrivera@cdfa.ca.gov', role: 'coordinator', isActive: true },
+      { id: uuidv4(), name: 'Sarah Kim', email: 'skim@cdfa.ca.gov', role: 'specialist', isActive: true },
+      { id: uuidv4(), name: 'Amy Wu', email: 'awu@cdfa.ca.gov', role: 'coordinator', isActive: false },
+    ];
+    dispatch({ type: 'SET_STAFF', payload: sampleStaff });
+
+    // Assign staff to sample activities
+    if (sampleActivities.length >= 4 && sampleStaff.length >= 4) {
+      dispatch({ type: 'UPDATE_ACTIVITY', payload: { id: sampleActivities[0].id, updates: { leadStaffId: sampleStaff[0].id, teamMemberIds: [sampleStaff[1].id, sampleStaff[2].id] } } });
+      dispatch({ type: 'UPDATE_ACTIVITY', payload: { id: sampleActivities[1].id, updates: { leadStaffId: sampleStaff[1].id, teamMemberIds: [sampleStaff[0].id, sampleStaff[3].id] } } });
+      dispatch({ type: 'UPDATE_ACTIVITY', payload: { id: sampleActivities[2].id, updates: { leadStaffId: sampleStaff[2].id, teamMemberIds: [sampleStaff[0].id] } } });
+      dispatch({ type: 'UPDATE_ACTIVITY', payload: { id: sampleActivities[3].id, updates: { leadStaffId: sampleStaff[0].id, teamMemberIds: [sampleStaff[1].id, sampleStaff[2].id, sampleStaff[3].id] } } });
+    }
+
     // Seed activity links connecting PM activities to Budget Tracker activities
     const activityLinks: ActivityLink[] = [
       {
@@ -1194,6 +1263,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
     // Staff
     getStaffMember,
+    addStaffMember,
+    updateStaffMember,
+    removeStaffMember,
 
     // Persistence
     exportToJSON,

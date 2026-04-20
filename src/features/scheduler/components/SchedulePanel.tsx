@@ -28,6 +28,10 @@ import { CSS } from '@dnd-kit/utilities';
 
 type ViewMode = 'grid' | 'supplier' | 'buyer';
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // Droppable slot component for empty cells and cells with meetings
 function DroppableSlot({
   id,
@@ -218,6 +222,8 @@ export default function SchedulePanel() {
     redo,
     canUndo,
     canRedo,
+    generationProgress,
+    lastScheduleScore,
   } = useSchedule();
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -260,8 +266,6 @@ export default function SchedulePanel() {
     targetDate: string;
   } | null>(null);
 
-  // Show open slots highlighting
-  const [showOpenSlots, setShowOpenSlots] = useState(false);
 
   // Track which meeting is being moved for contextual slot highlighting
   const [movingMeetingId, setMovingMeetingId] = useState<string | null>(null);
@@ -399,6 +403,96 @@ export default function SchedulePanel() {
 
   const getBuyer = (id: string) => buyerMap.get(id);
   const getSupplier = (id: string) => supplierMap.get(id);
+
+  // Sort suppliers: those with meetings on the current day come first (most meetings → fewest)
+  const sortedSuppliers = useMemo(() => {
+    return [...suppliers].sort((a, b) => {
+      const aMeetings = meetingSlots.filter(slot => getMeetingForSlot(a.id, slot.id)).length;
+      const bMeetings = meetingSlots.filter(slot => getMeetingForSlot(b.id, slot.id)).length;
+      if (aMeetings > 0 && bMeetings === 0) return -1;
+      if (aMeetings === 0 && bMeetings > 0) return 1;
+      if (aMeetings !== bMeetings) return bMeetings - aMeetings;
+      return a.companyName.localeCompare(b.companyName);
+    });
+  }, [suppliers, meetingSlots, meetingMap]);
+
+  // Print schedule matrix to a new window
+  const printSchedule = useCallback(() => {
+    const dayLabel = isMultiDay
+      ? `Day ${eventDates.indexOf(currentDay) + 1} — ${formatDateReadable(currentDay)}`
+      : formatDateReadable(currentDay);
+
+    // Only include suppliers that have meetings on this day
+    const printSuppliers = sortedSuppliers.filter(s =>
+      dayTimeSlots.some(slot => !slot.isBreak && getMeetingForSlot(s.id, slot.id))
+    );
+
+    const supplierHeaders = printSuppliers
+      .map(s => `<th style="padding:4px 6px;background:#f3f4f6;font-weight:600;font-size:10px;border:1px solid #d1d5db;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.companyName)}</th>`)
+      .join('');
+
+    const bodyRows = dayTimeSlots.map(slot => {
+      const timeCell = `<td style="padding:4px 6px;font-weight:600;font-size:10px;border:1px solid #d1d5db;white-space:nowrap;background:#fff;">${formatTime(slot.startTime)}${slot.isBreak ? ` <span style="font-size:9px;color:#a16207;">(${escapeHtml(slot.breakName || 'Break')})</span>` : ''}</td>`;
+      if (slot.isBreak) {
+        return `<tr>${timeCell}<td colspan="${printSuppliers.length}" style="padding:4px 6px;background:#FEF9C3;text-align:center;color:#a16207;font-size:10px;border:1px solid #d1d5db;">${escapeHtml(slot.breakName || 'Break')}</td></tr>`;
+      }
+      const cells = printSuppliers.map(supplier => {
+        const meeting = getMeetingForSlot(supplier.id, slot.id);
+        if (!meeting) return '<td style="padding:4px 6px;border:1px solid #d1d5db;"></td>';
+        const buyer = getBuyer(meeting.buyerId);
+        if (!buyer) return '<td style="padding:4px 6px;border:1px solid #d1d5db;"></td>';
+        const buyerColor = buyerColorMap.get(buyer.id) || '#3B82F6';
+        let bgColor: string;
+        let borderColor: string;
+        switch (meeting.status) {
+          case 'completed': bgColor = getLighterColor(buyerColor, 0.7); borderColor = buyerColor; break;
+          case 'in_progress': bgColor = getLighterColor('#3B82F6', 0.8); borderColor = '#3B82F6'; break;
+          case 'running_late': bgColor = getLighterColor('#EF4444', 0.85); borderColor = '#EF4444'; break;
+          case 'delayed': bgColor = getLighterColor('#F59E0B', 0.85); borderColor = '#F59E0B'; break;
+          default: bgColor = getLighterColor(buyerColor, 0.85); borderColor = buyerColor;
+        }
+        const textColor = getContrastTextColor(bgColor);
+        return `<td style="padding:2px;border:1px solid #d1d5db;"><div style="background:${bgColor};border-left:4px solid ${borderColor};color:${textColor};padding:3px 5px;border-radius:3px;"><div style="font-weight:600;font-size:10px;">${escapeHtml(buyer.name)}</div><div style="font-size:8px;opacity:0.8;">${escapeHtml(buyer.organization)}</div></div></td>`;
+      }).join('');
+      return `<tr>${timeCell}${cells}</tr>`;
+    }).join('');
+
+    const legendItems = buyers.map(buyer => {
+      const color = buyerColorMap.get(buyer.id) || '#3B82F6';
+      return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:10px;"><span style="width:10px;height:10px;background:${color};border-radius:2px;display:inline-block;"></span>${escapeHtml(buyer.name)}</span>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><head>
+<title>Schedule — ${escapeHtml(eventConfig?.name || 'Meeting Schedule')}</title>
+<style>
+@page { size: 17in 11in landscape; margin: 0.5cm; }
+* { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; color-adjust:exact !important; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color:#111; background:#fff; width:100%; }
+table { border-collapse:collapse; table-layout:fixed; width:100%; }
+</style>
+</head><body>
+<div id="print-wrapper">
+<div style="margin-bottom:8px;">
+<h1 style="font-size:16px;font-weight:700;margin:0;">${escapeHtml(eventConfig?.name || 'Meeting Schedule')}</h1>
+<p style="font-size:11px;color:#666;margin:2px 0 0;">${escapeHtml(dayLabel)}</p>
+</div>
+<table id="schedule-table">
+<thead><tr><th style="padding:4px 6px;background:#f3f4f6;font-weight:600;font-size:10px;border:1px solid #d1d5db;text-align:left;white-space:nowrap;">Time</th>${supplierHeaders}</tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+<div style="margin-top:8px;padding-top:6px;border-top:1px solid #d1d5db;">${legendItems}</div>
+</div>
+<script>
+window.onload = function() { window.print(); };
+</script>
+</body></html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
+  }, [sortedSuppliers, dayTimeSlots, buyers, buyerColorMap, eventConfig, currentDay, isMultiDay, eventDates, getMeetingForSlot, getBuyer]);
 
   // Drag and drop handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -601,8 +695,29 @@ export default function SchedulePanel() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               )}
-              {isGenerating ? 'Generating...' : 'Generate Schedule'}
+              {isGenerating
+                ? (generationProgress
+                  ? `Evaluating ${generationProgress.current}/${generationProgress.total}...`
+                  : 'Generating...')
+                : 'Generate Schedule'}
             </button>
+            {!isGenerating && lastScheduleScore && meetings.length > 0 && (
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                lastScheduleScore.maxConsecutiveGap <= 1
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                  : lastScheduleScore.maxConsecutiveGap <= 2
+                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                    : lastScheduleScore.maxConsecutiveGap <= 3
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                      : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+              }`}>
+                {lastScheduleScore.maxConsecutiveGap <= 1 ? 'Excellent' :
+                 lastScheduleScore.maxConsecutiveGap <= 2 ? 'Good' :
+                 lastScheduleScore.maxConsecutiveGap <= 3 ? 'Fair' : 'Gaps remain'}
+                {lastScheduleScore.candidatesEvaluated > 1 &&
+                  ` (best of ${lastScheduleScore.candidatesEvaluated})`}
+              </span>
+            )}
             {meetings.length > 0 && (
               <>
                 <button
@@ -628,17 +743,6 @@ export default function SchedulePanel() {
                 >
                   + Add Meeting
                 </button>
-                <button
-                  onClick={() => setShowOpenSlots(!showOpenSlots)}
-                  className={`px-4 py-2 rounded-md ${
-                    showOpenSlots
-                      ? 'bg-green-500 text-white hover:bg-green-600'
-                      : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
-                  }`}
-                  title="Highlight all available time slots"
-                >
-                  {showOpenSlots ? '● Hide Open Slots' : '○ Show Open Slots'}
-                </button>
                 {/* Undo/Redo buttons */}
                 <div className="flex gap-1 border-l border-gray-300 dark:border-gray-600 pl-2 ml-1">
                   <button
@@ -662,6 +766,13 @@ export default function SchedulePanel() {
                     </svg>
                   </button>
                 </div>
+                <button
+                  onClick={printSchedule}
+                  className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
+                  title="Print current day schedule"
+                >
+                  Print Schedule
+                </button>
               </>
             )}
           </div>
@@ -710,27 +821,45 @@ export default function SchedulePanel() {
           )}
         </div>
 
-        {meetings.length > 0 && (
-          <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 flex flex-wrap gap-4">
-            <span className="text-green-600 dark:text-green-400">{scheduledCount} scheduled</span>
-            {cancelledCount > 0 && <span className="text-red-600 dark:text-red-400">{cancelledCount} cancelled</span>}
-            {unscheduledPairs.length > 0 && (
-              <span className="text-orange-600 dark:text-orange-400" title="Some requested meetings couldn't be scheduled due to time constraints">
-                {unscheduledPairs.length} couldn't be scheduled
-              </span>
-            )}
-          </div>
-        )}
-        {unscheduledPairs.length > 0 && meetings.length > 0 && (
-          <div className="mt-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md text-sm">
-            <p className="text-orange-800 dark:text-orange-300 font-medium mb-1">
-              {unscheduledPairs.length} requested meeting(s) couldn't be scheduled
-            </p>
-            <p className="text-orange-700 dark:text-orange-400 text-xs">
-              Not enough time slots available. Consider extending event hours or reducing meeting durations.
-            </p>
-          </div>
-        )}
+        {meetings.length > 0 && (() => {
+          // Filter out unscheduled pairs where the supplier's only available days are all disabled
+          const disabledSet = new Set(eventConfig?.disabledDays || []);
+          const actionableUnscheduled = unscheduledPairs.filter(pair => {
+            const supplier = suppliers.find(s => s.id === pair.supplierId);
+            if (!supplier?.selectedDays?.length) return true; // no day restriction — real failure
+            return supplier.selectedDays.some(d => !disabledSet.has(d)); // has at least one enabled day
+          });
+          const disabledDayCount = unscheduledPairs.length - actionableUnscheduled.length;
+
+          return (
+            <>
+              <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 flex flex-wrap gap-4">
+                <span className="text-green-600 dark:text-green-400">{scheduledCount} scheduled</span>
+                {cancelledCount > 0 && <span className="text-red-600 dark:text-red-400">{cancelledCount} cancelled</span>}
+                {actionableUnscheduled.length > 0 && (
+                  <span className="text-orange-600 dark:text-orange-400" title="Some requested meetings couldn't be scheduled due to time constraints">
+                    {actionableUnscheduled.length} couldn't be scheduled
+                  </span>
+                )}
+                {disabledDayCount > 0 && (
+                  <span className="text-gray-500 dark:text-gray-400" title="These participants are only registered for non-meeting days">
+                    {disabledDayCount} on non-meeting days only
+                  </span>
+                )}
+              </div>
+              {actionableUnscheduled.length > 0 && (
+                <div className="mt-2 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md text-sm">
+                  <p className="text-orange-800 dark:text-orange-300 font-medium mb-1">
+                    {actionableUnscheduled.length} requested meeting(s) couldn't be scheduled
+                  </p>
+                  <p className="text-orange-700 dark:text-orange-400 text-xs">
+                    Not enough time slots available. Consider extending event hours or reducing meeting durations.
+                  </p>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Day Navigation for Multi-Day Events */}
         {isMultiDay && meetings.length > 0 && (
@@ -826,7 +955,7 @@ export default function SchedulePanel() {
                     <thead>
                       <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
                         <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky left-0 bg-gray-50 dark:bg-gray-700">Time</th>
-                        {suppliers.map(s => (
+                        {sortedSuppliers.map(s => (
                           <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32">
                             {s.companyName}
                           </th>
@@ -843,11 +972,11 @@ export default function SchedulePanel() {
                             )}
                           </td>
                           {slot.isBreak ? (
-                            <td colSpan={suppliers.length} className="px-3 py-2 text-center text-yellow-700 dark:text-yellow-400">
+                            <td colSpan={sortedSuppliers.length} className="px-3 py-2 text-center text-yellow-700 dark:text-yellow-400">
                               {slot.breakName}
                             </td>
                           ) : (
-                            suppliers.map(supplier => {
+                            sortedSuppliers.map(supplier => {
                               const meeting = getMeetingForSlot(supplier.id, slot.id);
                               const buyer = meeting ? getBuyer(meeting.buyerId) : null;
                               return (
@@ -1029,7 +1158,7 @@ export default function SchedulePanel() {
                                     // Check if we're moving a meeting and if this slot is for the same supplier
                                     const isMovingContext = !!movingMeetingId && movingMeetingSlotStatus?.meeting.supplierId === supplier.id;
                                     const slotStatus = isMovingContext ? movingMeetingSlotStatus?.statusMap.get(slot.id) : null;
-                                    const showSlotHighlight = showOpenSlots || isMovingContext;
+                                    const showSlotHighlight = isMovingContext;
 
                                     return (
                                     <div className="relative">

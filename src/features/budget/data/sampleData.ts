@@ -1,4 +1,4 @@
-import type { Cooperator, ExpenseCategory, ActivitySummary, Expense, Income, Participant } from '../types';
+import type { Cooperator, ExpenseCategory, ActivitySummary, Expense, Income, Participant, CategoryBudget } from '../types';
 
 export const sampleCooperators: Cooperator[] = [
   { id: 1, name: 'USDA-FAS', full_name: 'USDA Foreign Agricultural Service', contact_name: 'Maria Chen', email: 'mchen@usda.gov', phone: '202-555-0142', address: '1400 Independence Ave SW, Washington DC' },
@@ -407,6 +407,31 @@ export const sampleIncome: Record<number, Income[]> = {
     },
   ],
   4: [],
+};
+
+// Category budget allocations per activity
+// Activity 1 (FOODEX Japan): $45,000 total
+// Activity 2 (Fancy Food Show): $32,000 total
+export const sampleCategoryBudgets: Record<number, CategoryBudget[]> = {
+  1: [
+    { category_id: 1, activity_id: 1, allocated_amount: 12000 }, // Airfare
+    { category_id: 2, activity_id: 1, allocated_amount: 10000 }, // Lodging
+    { category_id: 3, activity_id: 1, allocated_amount: 7000 },  // Per Diem
+    { category_id: 4, activity_id: 1, allocated_amount: 3000 },  // Ground Transportation
+    { category_id: 5, activity_id: 1, allocated_amount: 4000 },  // Marketing Materials
+    { category_id: 7, activity_id: 1, allocated_amount: 6000 },  // Booth/Display
+    { category_id: 8, activity_id: 1, allocated_amount: 2000 },  // Registration Fees
+    { category_id: 9, activity_id: 1, allocated_amount: 1000 },  // Shipping
+  ],
+  2: [
+    { category_id: 1, activity_id: 2, allocated_amount: 6000 },  // Airfare
+    { category_id: 2, activity_id: 2, allocated_amount: 5000 },  // Lodging
+    { category_id: 3, activity_id: 2, allocated_amount: 3000 },  // Per Diem
+    { category_id: 5, activity_id: 2, allocated_amount: 5000 },  // Marketing Materials
+    { category_id: 7, activity_id: 2, allocated_amount: 8000 },  // Booth/Display
+    { category_id: 8, activity_id: 2, allocated_amount: 3000 },  // Registration Fees
+    { category_id: 9, activity_id: 2, allocated_amount: 2000 },  // Shipping
+  ],
 };
 
 export const INITIAL_NEXT_ID = 100;

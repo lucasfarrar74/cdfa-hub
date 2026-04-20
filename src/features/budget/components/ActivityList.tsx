@@ -56,22 +56,16 @@ function BudgetStatusBadge({ status }: { status: BudgetStatus }) {
   );
 }
 
-export default function ActivityList({ initialCooperatorFilter }: { initialCooperatorFilter?: number }) {
+export default function ActivityList() {
   const { activities, isLoading, error, loadActivities, cooperators, selectedActivityId, selectActivity } = useBudget();
   const [statusFilter, setStatusFilter] = useState<ActivityStatus | ''>('');
-  const [cooperatorFilter, setCooperatorFilter] = useState<number | ''>(initialCooperatorFilter || '');
+  const [cooperatorFilter, setCooperatorFilter] = useState<number | ''>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
 
   useEffect(() => {
     loadActivities();
   }, [loadActivities]);
-
-  useEffect(() => {
-    if (initialCooperatorFilter) {
-      setCooperatorFilter(initialCooperatorFilter);
-    }
-  }, [initialCooperatorFilter]);
 
   const filteredActivities = activities.filter(activity => {
     if (statusFilter && activity.status !== statusFilter) return false;

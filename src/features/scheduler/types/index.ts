@@ -5,6 +5,14 @@ export interface ContactPerson {
   title?: string;
 }
 
+export interface AvailabilityRestriction {
+  type: 'unavailable_date' | 'unavailable_slot' | 'preferred_time' | 'note';
+  date?: string;       // YYYY-MM-DD
+  startTime?: string;  // HH:mm
+  endTime?: string;    // HH:mm
+  note?: string;
+}
+
 export interface Supplier {
   id: string;
   companyName: string;           // PRIMARY FIELD (required)
@@ -14,6 +22,11 @@ export interface Supplier {
   meetingDuration: number; // in minutes
   preference: PreferenceType;
   preferenceList: string[]; // buyer IDs
+  availabilityRestrictions?: AvailabilityRestriction[];
+  selectedDays?: string[]; // YYYY-MM-DD dates the supplier is available for meetings
+  availableFrom?: string;  // HH:mm — earliest time this supplier can meet (e.g. "09:00")
+  availableTo?: string;    // HH:mm — latest time this supplier can meet (e.g. "14:00")
+
 }
 
 export interface Buyer {
@@ -27,7 +40,7 @@ export interface Buyer {
 
 export type PreferenceType = 'all' | 'include' | 'exclude';
 
-export type SchedulingStrategy = 'efficient' | 'spaced';
+export type SchedulingStrategy = 'efficient' | 'spaced' | 'equitable';
 
 export interface TimeSlot {
   id: string;
@@ -67,6 +80,7 @@ export interface Break {
   name: string;
   startTime: string; // HH:mm format
   endTime: string;   // HH:mm format
+  date?: string;     // YYYY-MM-DD — when set, break applies only to this day; when undefined, applies to all enabled days
 }
 
 export interface EventConfig {
@@ -78,7 +92,10 @@ export interface EventConfig {
   endTime: string;     // HH:mm format (daily end time)
   defaultMeetingDuration: number; // in minutes
   breaks: Break[];
+  disabledDays?: string[];  // YYYY-MM-DD dates within range that should generate no time slots
   schedulingStrategy: SchedulingStrategy;
+  optimizationEnabled?: boolean;  // Evaluate multiple candidates to minimize gaps (default true)
+  candidateCount?: number;        // Number of candidates to evaluate (default 10)
 }
 
 // Legacy EventConfig for migration
@@ -313,6 +330,17 @@ export interface ScheduleContextType extends ScheduleState {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+
+  // Schedule optimization
+  generationProgress: { current: number; total: number } | null;
+  lastScheduleScore: ScheduleScoreInfo | null;
+}
+
+export interface ScheduleScoreInfo {
+  totalScore: number;
+  totalMeetings: number;
+  maxConsecutiveGap: number;
+  candidatesEvaluated: number;
 }
 
 // Helper to migrate old supplier format to new

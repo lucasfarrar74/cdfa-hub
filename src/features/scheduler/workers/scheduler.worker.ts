@@ -10,10 +10,12 @@ interface WorkerMessage {
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   try {
     const { config, suppliers, buyers } = e.data;
-    const result = generateSchedule(config, suppliers, buyers);
-    self.postMessage(result);
+    const result = generateSchedule(config, suppliers, buyers, (current, total) => {
+      self.postMessage({ type: 'progress', current, total });
+    });
+    self.postMessage({ type: 'result', ...result });
   } catch (error) {
     console.error('[Worker] Error during generation:', error);
-    self.postMessage({ error: String(error) });
+    self.postMessage({ type: 'error', error: String(error) });
   }
 };

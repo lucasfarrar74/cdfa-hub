@@ -22,6 +22,7 @@ import type {
   CreateIncomeInput,
   CreateParticipantInput,
   ExpenseTemplate,
+  CategoryBudget,
 } from '../types';
 import {
   sampleCooperators,
@@ -30,6 +31,7 @@ import {
   sampleExpenses,
   sampleIncome,
   sampleParticipants,
+  sampleCategoryBudgets,
   INITIAL_NEXT_ID,
 } from '../data/sampleData';
 
@@ -49,6 +51,7 @@ interface BudgetState {
   allIncome: Record<number, Income[]>;
   participants: Participant[];
   templates: ExpenseTemplate[];
+  categoryBudgets: Record<number, CategoryBudget[]>;
   selectedActivityId: number | null;
   nextId: number;
   isLoading: boolean;
@@ -92,7 +95,9 @@ type BudgetAction =
   | { type: 'SET_TEMPLATES'; payload: ExpenseTemplate[] }
   | { type: 'ADD_TEMPLATE'; payload: ExpenseTemplate }
   | { type: 'UPDATE_TEMPLATE'; payload: { id: number; updates: Partial<ExpenseTemplate> } }
-  | { type: 'DELETE_TEMPLATE'; payload: number };
+  | { type: 'DELETE_TEMPLATE'; payload: number }
+  | { type: 'SET_CATEGORY_BUDGET'; payload: { activityId: number; categoryId: number; amount: number } }
+  | { type: 'DELETE_CATEGORY_BUDGET'; payload: { activityId: number; categoryId: number } };
 
 interface PersistedState {
   activities: ActivitySummary[];
@@ -102,6 +107,7 @@ interface PersistedState {
   categories: ExpenseCategory[];
   participants?: Participant[];
   templates?: ExpenseTemplate[];
+  categoryBudgets?: Record<number, CategoryBudget[]>;
   nextId: number;
 }
 
@@ -117,6 +123,7 @@ const initialState: BudgetState = {
   allIncome: {},
   participants: [],
   templates: [],
+  categoryBudgets: {},
   selectedActivityId: null,
   nextId: INITIAL_NEXT_ID,
   isLoading: false,
@@ -469,6 +476,31 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         templates: state.templates.filter(t => t.id !== action.payload),
       };
 
+    case 'SET_CATEGORY_BUDGET': {
+      const { activityId, categoryId, amount } = action.payload;
+      const existing = state.categoryBudgets[activityId] || [];
+      const idx = existing.findIndex(cb => cb.category_id === categoryId);
+      const updated = idx >= 0
+        ? existing.map(cb => cb.category_id === categoryId ? { ...cb, allocated_amount: amount } : cb)
+        : [...existing, { category_id: categoryId, activity_id: activityId, allocated_amount: amount }];
+      return {
+        ...state,
+        categoryBudgets: { ...state.categoryBudgets, [activityId]: updated },
+      };
+    }
+
+    case 'DELETE_CATEGORY_BUDGET': {
+      const { activityId, categoryId } = action.payload;
+      const existing = state.categoryBudgets[activityId] || [];
+      return {
+        ...state,
+        categoryBudgets: {
+          ...state.categoryBudgets,
+          [activityId]: existing.filter(cb => cb.category_id !== categoryId),
+        },
+      };
+    }
+
     case 'LOAD_STATE':
       return {
         ...state,
@@ -479,6 +511,7 @@ function budgetReducer(state: BudgetState, action: BudgetAction): BudgetState {
         categories: action.payload.categories,
         participants: action.payload.participants ?? [],
         templates: action.payload.templates ?? [],
+        categoryBudgets: action.payload.categoryBudgets ?? {},
         nextId: action.payload.nextId,
       };
 
@@ -523,6 +556,9 @@ interface BudgetContextType extends BudgetState {
   createTemplate: (data: Omit<ExpenseTemplate, 'id'>) => ExpenseTemplate;
   updateTemplate: (id: number, updates: Partial<ExpenseTemplate>) => void;
   deleteTemplate: (id: number) => void;
+  setCategoryBudget: (activityId: number, categoryId: number, amount: number) => void;
+  deleteCategoryBudget: (activityId: number, categoryId: number) => void;
+  getCategoryBudgets: (activityId: number) => CategoryBudget[];
   linkAccount: (username: string, password: string) => Promise<boolean>;
   clearError: () => void;
   loadSampleData: () => void;
@@ -556,6 +592,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       cooperators: sampleCooperators,
       categories: sampleCategories,
       participants: sampleParticipants,
+      categoryBudgets: sampleCategoryBudgets,
       nextId: INITIAL_NEXT_ID,
     };
     dispatch({ type: 'LOAD_STATE', payload: sampleState });
@@ -573,10 +610,11 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       categories: state.categories,
       participants: state.participants,
       templates: state.templates,
+      categoryBudgets: state.categoryBudgets,
       nextId: state.nextId,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.categoryBudgets, state.nextId]);
 
   // Auto-compute dashboard summary when activities change
   useEffect(() => {
@@ -1168,6 +1206,18 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'DELETE_TEMPLATE', payload: id });
   }, []);
 
+  const setCategoryBudget = useCallback((activityId: number, categoryId: number, amount: number) => {
+    dispatch({ type: 'SET_CATEGORY_BUDGET', payload: { activityId, categoryId, amount } });
+  }, []);
+
+  const deleteCategoryBudget = useCallback((activityId: number, categoryId: number) => {
+    dispatch({ type: 'DELETE_CATEGORY_BUDGET', payload: { activityId, categoryId } });
+  }, []);
+
+  const getCategoryBudgets = useCallback((activityId: number): CategoryBudget[] => {
+    return state.categoryBudgets[activityId] || [];
+  }, [state.categoryBudgets]);
+
   const linkAccount = useCallback(async (_username: string, _password: string): Promise<boolean> => {
     dispatch({ type: 'SET_LINKED', payload: true });
     return true;
@@ -1185,6 +1235,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       cooperators: sampleCooperators,
       categories: sampleCategories,
       participants: sampleParticipants,
+      categoryBudgets: sampleCategoryBudgets,
       nextId: INITIAL_NEXT_ID,
     };
     dispatch({ type: 'LOAD_STATE', payload: sampleState });
@@ -1199,10 +1250,11 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       categories: state.categories,
       participants: state.participants,
       templates: state.templates,
+      categoryBudgets: state.categoryBudgets,
       nextId: state.nextId,
     };
     return JSON.stringify(data, null, 2);
-  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.nextId]);
+  }, [state.activities, state.allExpenses, state.allIncome, state.cooperators, state.categories, state.participants, state.templates, state.categoryBudgets, state.nextId]);
 
   const importFromJSON = useCallback((json: string): boolean => {
     try {
@@ -1260,6 +1312,9 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         createTemplate,
         updateTemplate,
         deleteTemplate,
+        setCategoryBudget,
+        deleteCategoryBudget,
+        getCategoryBudgets,
         linkAccount,
         clearError,
         loadSampleData,
