@@ -4,7 +4,16 @@
 // creates or updates a Google Sheets spreadsheet. The caller handles OAuth
 // (see src/lib/googleAuth.ts) and passes in a short-lived access token.
 
-import type { WorkbookSheet, SheetMerge } from './buildScheduleWorkbook';
+import type { WorkbookSheet, SheetMerge, CellFill } from './buildScheduleWorkbook';
+
+function hexToSheetColor(hex: string): { red: number; green: number; blue: number } {
+  const clean = hex.replace('#', '');
+  return {
+    red: parseInt(clean.slice(0, 2), 16) / 255,
+    green: parseInt(clean.slice(2, 4), 16) / 255,
+    blue: parseInt(clean.slice(4, 6), 16) / 255,
+  };
+}
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
@@ -53,9 +62,10 @@ function buildFormattingRequests(
     const sheetId = sheetIdByName.get(sheet.name);
     if (sheetId === undefined) continue;
 
-    // Column widths. Sheets API takes pixel widths; multiply Excel "wch"
-    // units by 7 as a rough conversion (a character is ~7px at the default
-    // font size).
+    const rowCount = sheet.rows.length;
+    const colCount = sheet.rows.reduce((max, r) => Math.max(max, r.length), 0);
+
+    // Column widths (Excel wch → px at ~7 px per char).
     if (sheet.columnWidths?.length) {
       sheet.columnWidths.forEach((wch, idx) => {
         requests.push({
@@ -91,18 +101,112 @@ function buildFormattingRequests(
       }
     }
 
-    // Bold the title row (row 0) for visual emphasis.
+    // Base formatting across the entire data area: wrap, 11pt, vertically
+    // centered. This keeps long buyer/supplier names readable without
+    // manual row-height tweaking.
+    if (rowCount > 0 && colCount > 0) {
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: 0,
+            endRowIndex: rowCount,
+            startColumnIndex: 0,
+            endColumnIndex: colCount,
+          },
+          cell: {
+            userEnteredFormat: {
+              wrapStrategy: sheet.wrapText ? 'WRAP' : 'OVERFLOW_CELL',
+              verticalAlignment: 'MIDDLE',
+              textFormat: { fontSize: 11 },
+            },
+          },
+          fields: 'userEnteredFormat(wrapStrategy,verticalAlignment,textFormat.fontSize)',
+        },
+      });
+    }
+
+    // Title row — bold, larger, centered.
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
-        cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 14 } } },
-        fields: 'userEnteredFormat(textFormat)',
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true, fontSize: 16 },
+            horizontalAlignment: 'CENTER',
+          },
+        },
+        fields: 'userEnteredFormat(textFormat.bold,textFormat.fontSize,horizontalAlignment)',
       },
     });
+
+    // Date / subtitle row — bold, centered, smaller than title.
+    if (rowCount >= 2) {
+      requests.push({
+        repeatCell: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: 2 },
+          cell: {
+            userEnteredFormat: {
+              textFormat: { bold: true, fontSize: 12 },
+              horizontalAlignment: 'CENTER',
+            },
+          },
+          fields: 'userEnteredFormat(textFormat.bold,textFormat.fontSize,horizontalAlignment)',
+        },
+      });
+    }
+
+    // Per-cell background fills for buyer-colored meetings and header banners.
+    if (sheet.cellFills?.length) {
+      for (const fill of sheet.cellFills) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: fill.row,
+              endRowIndex: fill.row + 1,
+              startColumnIndex: fill.col,
+              endColumnIndex: fill.col + 1,
+            },
+            cell: {
+              userEnteredFormat: { backgroundColor: hexToSheetColor(fill.color) },
+            },
+            fields: 'userEnteredFormat.backgroundColor',
+          },
+        });
+      }
+    }
+
+    // Freeze header rows so they stay visible when scrolling.
+    if (sheet.frozenRows && sheet.frozenRows > 0) {
+      requests.push({
+        updateSheetProperties: {
+          properties: { sheetId, gridProperties: { frozenRowCount: sheet.frozenRows } },
+          fields: 'gridProperties.frozenRowCount',
+        },
+      });
+    }
+
+    // Auto-resize rows to fit wrapped content after everything else is set.
+    if (rowCount > 0) {
+      requests.push({
+        autoResizeDimensions: {
+          dimensions: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: 0,
+            endIndex: rowCount,
+          },
+        },
+      });
+    }
   }
 
   return requests;
 }
+
+// Re-export so consumers don't need to import from buildScheduleWorkbook directly.
+export type { CellFill };
 
 /**
  * Create a new Google Spreadsheet with all the given sheets populated.

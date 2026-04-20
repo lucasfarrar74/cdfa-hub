@@ -35,9 +35,32 @@ describe('buildScheduleWorkbook', () => {
 
     const names = sheets.map(s => s.name);
     expect(names).toContain('Master Grid');
-    expect(names).toContain('By Supplier');
     expect(names).toContain('By Buyer');
     expect(names).toContain('All Meetings');
+    // "By Supplier" is intentionally gone — Master Grid is already
+    // supplier-centric, the duplicate tab just added noise.
+    expect(names).not.toContain('By Supplier');
+  });
+
+  it('attaches a buyer-colored fill on each booked grid cell', () => {
+    const suppliers = [makeSupplier({ id: 's1', companyName: 'Acme' })];
+    const buyers = [makeBuyer('b1', { name: 'Alice' })];
+    const slots = [makeSlot('slot1', '2024-01-01', 9, 0)];
+    const meetings = [makeMeeting('m1', 's1', 'b1', 'slot1')];
+
+    const [grid] = buildScheduleWorkbook({
+      eventConfig: makeEventConfig(),
+      suppliers,
+      buyers,
+      meetings,
+      timeSlots: slots,
+    });
+
+    // Find the fill entry for the single meeting — row 5 (after 5 header
+    // rows), col 1 (after time col).
+    const meetingFill = grid.cellFills?.find(f => f.row === 5 && f.col === 1);
+    expect(meetingFill).toBeTruthy();
+    expect(meetingFill?.color).toMatch(/^#[0-9A-Fa-f]{6}$/);
   });
 
   it('places buyer name in the correct grid cell', () => {
@@ -84,15 +107,35 @@ describe('buildScheduleWorkbook', () => {
     expect(allMeetings.rows.length).toBe(4 + 1);
   });
 
-  it('splits wide day into multiple grid sheets past maxColumnsPerSheet', () => {
+  it('produces one grid sheet per day in a multi-day event', () => {
+    const suppliers = [makeSupplier({ id: 's1', companyName: 'Acme' })];
+    const buyers = [makeBuyer('b1')];
+    const slots = [
+      makeSlot('slot1', '2024-01-01', 9, 0),
+      makeSlot('slot2', '2024-01-02', 9, 0),
+      makeSlot('slot3', '2024-01-03', 9, 0),
+    ];
+    const meetings = [makeMeeting('m1', 's1', 'b1', 'slot1')];
+
+    const sheets = buildScheduleWorkbook({
+      eventConfig: makeEventConfig({ endDate: '2024-01-03' }),
+      suppliers,
+      buyers,
+      meetings,
+      timeSlots: slots,
+    });
+    const gridSheets = sheets.filter(s => s.name.startsWith('Grid '));
+    // 3 days → 3 daily grids (multi-day naming: "Grid Mon Jan 1", etc.)
+    expect(gridSheets.length).toBe(3);
+  });
+
+  it('keeps the grid sheet column count equal to suppliers + 1 regardless of headcount', () => {
     const suppliers = Array.from({ length: 9 }, (_, i) =>
       makeSupplier({ id: `s${i}`, companyName: `Supplier${i}` }),
     );
-    const buyers = Array.from({ length: 9 }, (_, i) => makeBuyer(`b${i}`));
+    const buyers = [makeBuyer('b0')];
     const slots = [makeSlot('slot1', '2024-01-01', 9, 0)];
-    const meetings = suppliers.map((s, i) =>
-      makeMeeting(`m${i}`, s.id, `b${i}`, 'slot1'),
-    );
+    const meetings = [makeMeeting('m0', 's0', 'b0', 'slot1')];
 
     const sheets = buildScheduleWorkbook({
       eventConfig: makeEventConfig(),
@@ -100,13 +143,12 @@ describe('buildScheduleWorkbook', () => {
       buyers,
       meetings,
       timeSlots: slots,
-      maxColumnsPerSheet: 7,
     });
-    // 9 suppliers / 7 = 2 grid sheets + 2 by-supplier sheets
-    const gridLike = sheets.filter(s => s.name.startsWith('Grid') || s.name === 'Master Grid');
-    const supplierLike = sheets.filter(s => s.name.startsWith('Supplier') || s.name === 'By Supplier');
-    expect(gridLike.length).toBe(2);
-    expect(supplierLike.length).toBe(2);
+    const grid = sheets.find(s => s.name === 'Master Grid')!;
+    // Column count on the header row = time + 9 suppliers
+    expect(grid.rows[4].length).toBe(10);
+    // No separate "Grid ... 2" sheet should exist from splitting.
+    expect(sheets.some(s => s.name.endsWith(' 2'))).toBe(false);
   });
 
   it('prepends a Date column when the event spans multiple days', () => {

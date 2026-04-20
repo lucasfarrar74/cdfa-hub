@@ -1,5 +1,6 @@
 import type { EventConfig, Supplier, Buyer, Meeting, TimeSlot } from '../types';
 import { formatTime, formatDateRange, formatDateReadable, getUniqueDatesFromSlots } from './timeUtils';
+import { createBuyerColorMap } from './colors';
 
 // Safe time formatter that tolerates both Date objects and ISO strings
 // (meetings loaded from JSON/Firestore have strings).
@@ -13,11 +14,33 @@ function safeFormatTime(time: Date | string): string {
   }
 }
 
+/** Lighten a hex color by mixing it with white. amount 0..1 (1 = pure white). */
+function lighten(hex: string, amount: number): string {
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  return (
+    '#' +
+    mix(r).toString(16).padStart(2, '0') +
+    mix(g).toString(16).padStart(2, '0') +
+    mix(b).toString(16).padStart(2, '0')
+  );
+}
+
 export interface SheetMerge {
   startRow: number;
   endRow: number;
   startCol: number;
   endCol: number;
+}
+
+export interface CellFill {
+  row: number;
+  col: number;
+  /** Hex color, e.g. "#FFF3E0". */
+  color: string;
 }
 
 export interface WorkbookSheet {
@@ -29,6 +52,12 @@ export interface WorkbookSheet {
   columnWidths?: number[];
   /** Cell merges (inclusive ranges, zero-indexed). Optional. */
   merges?: SheetMerge[];
+  /** Background fills for specific cells (sparse list). */
+  cellFills?: CellFill[];
+  /** Wrap text in all cells of this sheet. Default false. */
+  wrapText?: boolean;
+  /** Number of top rows to freeze (stay visible on scroll). Default 0. */
+  frozenRows?: number;
 }
 
 export interface BuildScheduleWorkbookInput {
@@ -37,8 +66,6 @@ export interface BuildScheduleWorkbookInput {
   buyers: Buyer[];
   meetings: Meeting[];
   timeSlots: TimeSlot[];
-  /** Max supplier columns per grid sheet; long events get split. Default 7. */
-  maxColumnsPerSheet?: number;
 }
 
 /**
@@ -46,24 +73,13 @@ export interface BuildScheduleWorkbookInput {
  * output format. Both the Excel export (via `xlsx`) and the Google Sheets
  * export consume this so they stay in lockstep.
  *
- * The sheets produced:
- *   - "Master Grid" / "Grid <Day> <N>" — time rows × supplier columns,
- *     buyer names in cells. Split by day and into groups of
- *     maxColumnsPerSheet suppliers.
- *   - "By Supplier" / "Supplier <Day> <N>" — same shape but labeled as
- *     supplier-centric; also split by day/group.
- *   - "By Buyer" — time rows × buyer columns, supplier names in cells.
- *   - "All Meetings" — flat list with supplier, buyer, contact info, status.
+ * Layout: one Master Grid sheet per event day showing all suppliers in
+ * columns and time slots in rows, with meetings filled in as buyer names
+ * tinted by each buyer's assigned color. Plus "By Buyer" (pivoted
+ * perspective) and "All Meetings" (flat detail list).
  */
 export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): WorkbookSheet[] {
-  const {
-    eventConfig,
-    suppliers,
-    buyers,
-    meetings,
-    timeSlots,
-    maxColumnsPerSheet = 7,
-  } = input;
+  const { eventConfig, suppliers, buyers, meetings, timeSlots } = input;
 
   const meetingSlots = (timeSlots || []).filter(s => !s.isBreak);
   const activeMeetings = (meetings || []).filter(
@@ -86,116 +102,120 @@ export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): Workbo
   const getBuyer = (id: string) => buyers.find(b => b.id === id);
   const getSupplier = (id: string) => suppliers.find(s => s.id === id);
   const getSlot = (id: string) => timeSlots.find(s => s.id === id);
+  const buyerColorMap = createBuyerColorMap(buyers);
+
+  // Uniform pixel-ish widths converted to Excel "wch" units (1 wch ≈ 7 px).
+  const TIME_COL_WCH = 12;
+  const MEETING_COL_WCH = 22;
 
   const sheets: WorkbookSheet[] = [];
 
+  // Header rows are shared across daily grid sheets. We merge them across
+  // the full width of each sheet for a banner look.
   for (const date of dates) {
     const daySlots = meetingSlots.filter(s => s.date === date);
-    const dateLabel = isMultiDay ? formatDateReadable(date).split(',')[0] : '';
 
-    const daySuppliers = suppliers.filter(supplier =>
-      daySlots.some(slot =>
-        activeMeetings.some(m => m.supplierId === supplier.id && m.timeSlotId === slot.id),
-      ),
-    );
+    // Include ALL suppliers so column structure is identical across days —
+    // empty cells make gaps visible rather than hiding them.
+    const daySuppliers = suppliers.slice();
     if (daySuppliers.length === 0) continue;
 
-    const groups: Supplier[][] = [];
-    for (let i = 0; i < daySuppliers.length; i += maxColumnsPerSheet) {
-      groups.push(daySuppliers.slice(i, i + maxColumnsPerSheet));
-    }
+    const dayLabel = isMultiDay ? formatDateReadable(date).split(',')[0] : '';
+    const sheetName = isMultiDay ? `Grid ${dayLabel}` : 'Master Grid';
 
-    // Master Grid sheets
-    groups.forEach((group, groupIdx) => {
-      const isSingle = dates.length === 1 && groups.length === 1;
-      const name = isSingle
-        ? 'Master Grid'
-        : `Grid${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
+    const headerRows: string[][] = [
+      [title],
+      [isMultiDay ? formatDateReadable(date) : dateRangeStr],
+      [`Generated: ${new Date().toLocaleDateString()}`],
+      [],
+      ['Time', ...daySuppliers.map(s => s.companyName)],
+    ];
+    const dataRows: string[][] = [];
+    const cellFills: CellFill[] = [];
 
-      const header: string[][] = [
-        [title],
-        [isMultiDay ? formatDateReadable(date) : dateRangeStr],
-        [`Generated: ${new Date().toLocaleDateString()}`],
-        [],
-        ['Time', ...group.map(s => s.companyName)],
-      ];
-      const rows = daySlots.map(slot => [
-        safeFormatTime(slot.startTime),
-        ...group.map(supplier => {
-          const meeting = activeMeetings.find(
-            m => m.supplierId === supplier.id && m.timeSlotId === slot.id,
-          );
-          return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-        }),
-      ]);
+    // Header banner rows get a light blue fill for prominence.
+    cellFills.push({ row: 0, col: 0, color: '#DBEAFE' });
+    cellFills.push({ row: 1, col: 0, color: '#DBEAFE' });
 
-      sheets.push({
-        name: name.substring(0, 31),
-        rows: [...header, ...rows],
-        columnWidths: [
-          10,
-          ...group.map(s => Math.max(14, Math.min(28, s.companyName.length + 2))),
-        ],
-        merges: [
-          { startRow: 0, endRow: 0, startCol: 0, endCol: group.length },
-          { startRow: 1, endRow: 1, startCol: 0, endCol: group.length },
-        ],
+    daySlots.forEach((slot, rowIdx) => {
+      const absRow = headerRows.length + rowIdx;
+      const row: string[] = [safeFormatTime(slot.startTime)];
+      daySuppliers.forEach((supplier, colIdx) => {
+        const meeting = activeMeetings.find(
+          m => m.supplierId === supplier.id && m.timeSlotId === slot.id,
+        );
+        const buyer = meeting ? getBuyer(meeting.buyerId) : null;
+        row.push(buyer?.name || '');
+        if (buyer) {
+          const baseColor = buyerColorMap.get(buyer.id) || '#3B82F6';
+          cellFills.push({
+            row: absRow,
+            col: colIdx + 1,
+            color: lighten(baseColor, 0.65),
+          });
+        }
       });
+      dataRows.push(row);
     });
 
-    // By Supplier sheets
-    groups.forEach((group, groupIdx) => {
-      const isSingle = dates.length === 1 && groups.length === 1;
-      const name = isSingle
-        ? 'By Supplier'
-        : `Supplier${isMultiDay ? ' ' + dateLabel : ''}${groups.length > 1 ? ' ' + (groupIdx + 1) : ''}`.trim();
+    const allRows = [...headerRows, ...dataRows];
+    const columnCount = daySuppliers.length + 1;
 
-      const header: string[][] = [
-        [title],
-        ['Schedule by Supplier'],
-        [],
-        ['Time', ...group.map(s => s.companyName)],
-      ];
-      const rows = daySlots.map(slot => [
-        safeFormatTime(slot.startTime),
-        ...group.map(supplier => {
-          const meeting = activeMeetings
-            .filter(m => m.supplierId === supplier.id)
-            .find(m => m.timeSlotId === slot.id);
-          return meeting ? getBuyer(meeting.buyerId)?.name || '' : '';
-        }),
-      ]);
-
-      sheets.push({
-        name: name.substring(0, 31),
-        rows: [...header, ...rows],
-        columnWidths: [
-          10,
-          ...group.map(s => Math.max(14, Math.min(28, s.companyName.length + 2))),
-        ],
-      });
+    sheets.push({
+      name: sheetName.substring(0, 31),
+      rows: allRows,
+      columnWidths: [TIME_COL_WCH, ...daySuppliers.map(() => MEETING_COL_WCH)],
+      merges: [
+        // Title banner across the row
+        { startRow: 0, endRow: 0, startCol: 0, endCol: columnCount - 1 },
+        // Date line across the row
+        { startRow: 1, endRow: 1, startCol: 0, endCol: columnCount - 1 },
+        // Generated line across the row
+        { startRow: 2, endRow: 2, startCol: 0, endCol: columnCount - 1 },
+      ],
+      cellFills,
+      wrapText: true,
+      frozenRows: 5,
     });
   }
 
-  // By Buyer sheet
+  // By Buyer — pivot with buyers as columns, suppliers as cell values.
+  const byBuyerHeaderCols = isMultiDay
+    ? ['Date', 'Time', ...buyers.map(b => b.name)]
+    : ['Time', ...buyers.map(b => b.name)];
   const byBuyerHeader: string[][] = [
     [title],
     ['Schedule by Buyer'],
     [],
-    [isMultiDay ? 'Date' : '', 'Time', ...buyers.map(b => b.name)].filter(Boolean) as string[],
+    byBuyerHeaderCols,
   ];
-  const byBuyerRows = meetingSlots.map(slot => {
-    const row: string[] = [
-      safeFormatTime(slot.startTime),
-      ...buyers.map(buyer => {
-        const meeting = activeMeetings
-          .filter(m => m.buyerId === buyer.id)
-          .find(m => m.timeSlotId === slot.id);
-        return meeting ? getSupplier(meeting.supplierId)?.companyName || '' : '';
-      }),
-    ];
-    if (isMultiDay) row.unshift(formatDateReadable(slot.date));
-    return row;
+  const byBuyerRows: string[][] = [];
+  const byBuyerFills: CellFill[] = [
+    { row: 0, col: 0, color: '#DBEAFE' },
+    { row: 1, col: 0, color: '#DBEAFE' },
+  ];
+
+  meetingSlots.forEach((slot, rowIdx) => {
+    const absRow = byBuyerHeader.length + rowIdx;
+    const row: string[] = [];
+    if (isMultiDay) row.push(formatDateReadable(slot.date));
+    row.push(safeFormatTime(slot.startTime));
+    buyers.forEach((buyer, buyerIdx) => {
+      const meeting = activeMeetings
+        .filter(m => m.buyerId === buyer.id)
+        .find(m => m.timeSlotId === slot.id);
+      const supplier = meeting ? getSupplier(meeting.supplierId) : null;
+      row.push(supplier?.companyName || '');
+      if (supplier) {
+        const baseColor = buyerColorMap.get(buyer.id) || '#3B82F6';
+        byBuyerFills.push({
+          row: absRow,
+          col: (isMultiDay ? 2 : 1) + buyerIdx,
+          color: lighten(baseColor, 0.65),
+        });
+      }
+    });
+    byBuyerRows.push(row);
   });
 
   sheets.push({
@@ -203,12 +223,19 @@ export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): Workbo
     rows: [...byBuyerHeader, ...byBuyerRows],
     columnWidths: [
       ...(isMultiDay ? [18] : []),
-      10,
-      ...buyers.map(b => Math.max(12, Math.min(25, b.name.length + 2))),
+      TIME_COL_WCH,
+      ...buyers.map(() => MEETING_COL_WCH),
     ],
+    merges: [
+      { startRow: 0, endRow: 0, startCol: 0, endCol: byBuyerHeaderCols.length - 1 },
+      { startRow: 1, endRow: 1, startCol: 0, endCol: byBuyerHeaderCols.length - 1 },
+    ],
+    cellFills: byBuyerFills,
+    wrapText: true,
+    frozenRows: 4,
   });
 
-  // All Meetings detail
+  // All Meetings — flat detail list.
   const allHeaderFields: string[] = [
     ...(isMultiDay ? ['Date'] : []),
     'Time',
@@ -221,13 +248,13 @@ export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): Workbo
     'Organization',
     'Status',
   ];
-  const allMeetingsHeader: string[][] = [
+  const allHeaderRows: string[][] = [
     [title],
     ['All Meetings Detail'],
     [],
     allHeaderFields,
   ];
-  const allMeetingsRows = activeMeetings.map(m => {
+  const allDataRows = activeMeetings.map(m => {
     const slot = getSlot(m.timeSlotId);
     const supplier = getSupplier(m.supplierId);
     const buyer = getBuyer(m.buyerId);
@@ -249,19 +276,29 @@ export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): Workbo
 
   sheets.push({
     name: 'All Meetings',
-    rows: [...allMeetingsHeader, ...allMeetingsRows],
+    rows: [...allHeaderRows, ...allDataRows],
     columnWidths: [
       ...(isMultiDay ? [18] : []),
-      10,
-      20,
+      TIME_COL_WCH,
+      MEETING_COL_WCH,
       18,
-      25,
+      26,
       18,
-      25,
-      18,
-      18,
-      12,
+      26,
+      MEETING_COL_WCH,
+      MEETING_COL_WCH,
+      14,
     ],
+    merges: [
+      { startRow: 0, endRow: 0, startCol: 0, endCol: allHeaderFields.length - 1 },
+      { startRow: 1, endRow: 1, startCol: 0, endCol: allHeaderFields.length - 1 },
+    ],
+    cellFills: [
+      { row: 0, col: 0, color: '#DBEAFE' },
+      { row: 1, col: 0, color: '#DBEAFE' },
+    ],
+    wrapText: true,
+    frozenRows: 4,
   });
 
   return sheets;
