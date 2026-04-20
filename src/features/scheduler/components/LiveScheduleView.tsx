@@ -35,17 +35,18 @@ function MeetingCell({
   const isCompleted = meeting.status === 'completed';
   const isDelayed = meeting.status === 'delayed' || meeting.status === 'running_late';
 
-  const bg = isCompleted
-    ? hexToRgba(buyerColor, 0.18)
-    : hexToRgba(buyerColor, 0.85);
-  const borderColor = isInProgress ? '#FBBF24' : isDelayed ? '#EF4444' : buyerColor;
+  // Soft tinted background with stronger colored left border. Keeps the
+  // room-at-a-glance buyer coding without shouting.
+  const bg = isCompleted ? '#F9FAFB' : hexToRgba(buyerColor, 0.12);
+  const borderColor = isDelayed ? '#DC2626' : buyerColor;
+  const textColor = isCompleted ? '#9CA3AF' : '#111827';
 
   return (
     <div
-      className={`h-full w-full flex items-center justify-center px-2 py-3 text-center font-semibold transition-colors ${
-        isInProgress ? 'ring-4 ring-yellow-400 animate-pulse' : ''
-      } ${isCompleted ? 'line-through text-gray-500' : 'text-white'}`}
-      style={{ backgroundColor: bg, borderLeft: `6px solid ${borderColor}` }}
+      className={`h-full w-full flex items-center justify-center px-2 py-3 text-center font-semibold ${
+        isInProgress ? 'ring-4 ring-blue-400 ring-inset' : ''
+      } ${isCompleted ? 'line-through' : ''}`}
+      style={{ backgroundColor: bg, borderLeft: `6px solid ${borderColor}`, color: textColor }}
       title={meeting.status}
     >
       <span className="text-2xl xl:text-3xl leading-tight">{buyerName}</span>
@@ -154,12 +155,12 @@ function LiveScheduleContent() {
 
   if (!activeProject) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-gray-100 p-10">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-900 p-10">
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold">No schedule open</h1>
-          <p className="text-xl text-gray-400">
+          <p className="text-xl text-gray-600">
             Open a project in the Meeting Scheduler or paste a share link ending in
-            <code className="mx-2 px-2 py-1 bg-gray-800 rounded">?share=YOUR_ID</code>.
+            <code className="mx-2 px-2 py-1 bg-gray-200 rounded">?share=YOUR_ID</code>.
           </p>
           <button
             onClick={() => navigate('/meeting-scheduler')}
@@ -173,14 +174,14 @@ function LiveScheduleContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
       {/* Header */}
-      <header className="flex items-center justify-between px-8 py-4 border-b border-gray-800">
+      <header className="flex items-center justify-between px-8 py-4 bg-white border-b border-gray-200">
         <div>
-          <h1 className="text-4xl font-bold">
+          <h1 className="text-4xl font-bold text-gray-900">
             {eventConfig?.name || activeProject.name}
           </h1>
-          <p className="text-xl text-gray-400">
+          <p className="text-xl text-gray-600">
             {selectedDay ? formatDateReadable(selectedDay) : 'Select a day'}
             {isMultiDay && selectedDay
               ? ` — Day ${eventDates.indexOf(selectedDay) + 1} of ${eventDates.length}`
@@ -188,16 +189,16 @@ function LiveScheduleContent() {
           </p>
         </div>
         <div className="flex items-center gap-6">
-          <div className="text-5xl font-mono tabular-nums">{clock}</div>
+          <div className="text-5xl font-mono tabular-nums text-gray-900">{clock}</div>
           <button
             onClick={toggleFullscreen}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-lg"
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-lg text-lg"
           >
             {isFullscreen ? 'Exit full screen' : 'Full screen'}
           </button>
           <button
             onClick={() => navigate('/meeting-scheduler')}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-lg"
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-lg text-lg"
           >
             Back to Scheduler
           </button>
@@ -206,7 +207,7 @@ function LiveScheduleContent() {
 
       {/* Day selector (multi-day only) */}
       {isMultiDay && (
-        <div className="flex gap-2 px-8 py-3 border-b border-gray-800 overflow-x-auto">
+        <div className="flex gap-2 px-8 py-3 bg-white border-b border-gray-200 overflow-x-auto">
           {eventDates.map((date, idx) => (
             <button
               key={date}
@@ -214,7 +215,7 @@ function LiveScheduleContent() {
               className={`px-4 py-2 rounded-lg text-lg whitespace-nowrap ${
                 selectedDay === date
                   ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
               Day {idx + 1} — {formatDateReadable(date)}
@@ -230,16 +231,16 @@ function LiveScheduleContent() {
             <p className="text-3xl text-gray-500">No meetings scheduled for this day.</p>
           </div>
         ) : (
-          <table className="w-full border-collapse">
-            <thead className="sticky top-0 bg-gray-900 z-10">
+          <table className="w-full border-collapse bg-white">
+            <thead className="sticky top-0 bg-white z-10 shadow-sm">
               <tr>
-                <th className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-800 min-w-[10rem]">
+                <th className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-200 text-gray-900 min-w-[10rem]">
                   Time
                 </th>
                 {daySuppliers.map(s => (
                   <th
                     key={s.id}
-                    className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-800 border-l border-gray-800 min-w-[12rem]"
+                    className="text-left px-4 py-3 text-xl font-semibold border-b border-gray-200 border-l border-gray-200 text-gray-900 min-w-[12rem]"
                   >
                     {s.companyName}
                   </th>
@@ -249,21 +250,29 @@ function LiveScheduleContent() {
             <tbody>
               {dayTimeSlots.map(slot => {
                 if (slot.isBreak) {
+                  // Match the grid view: yellow-tinted row spanning all
+                  // suppliers, break name centered, time + name in the
+                  // left cell.
                   return (
-                    <tr key={slot.id}>
+                    <tr key={slot.id} className="bg-yellow-50 border-b border-gray-200">
+                      <td className="px-4 py-3 text-2xl font-mono font-semibold text-gray-900 whitespace-nowrap">
+                        {formatTime(slot.startTime)}
+                        <span className="ml-2 text-base text-yellow-700 font-sans font-medium">
+                          ({slot.breakName || 'Break'})
+                        </span>
+                      </td>
                       <td
-                        colSpan={daySuppliers.length + 1}
-                        className="px-4 py-3 text-center text-xl italic text-gray-500 bg-gray-850 border-b border-gray-800"
-                        style={{ backgroundColor: '#0F172A' }}
+                        colSpan={daySuppliers.length}
+                        className="px-4 py-3 text-center text-xl italic text-yellow-700 border-l border-gray-200"
                       >
-                        {formatTime(slot.startTime)} — {slot.breakName || 'Break'} — {formatTime(slot.endTime)}
+                        {slot.breakName || 'Break'}
                       </td>
                     </tr>
                   );
                 }
                 return (
                   <tr key={slot.id}>
-                    <td className="px-4 py-3 text-2xl font-mono font-semibold border-b border-gray-800 whitespace-nowrap">
+                    <td className="px-4 py-3 text-2xl font-mono font-semibold text-gray-900 border-b border-gray-200 whitespace-nowrap">
                       {formatTime(slot.startTime)}
                     </td>
                     {daySuppliers.map(s => {
@@ -272,7 +281,7 @@ function LiveScheduleContent() {
                       return (
                         <td
                           key={s.id}
-                          className="p-0 border-b border-gray-800 border-l border-gray-800 h-20"
+                          className="p-0 border-b border-gray-200 border-l border-gray-200 h-20"
                         >
                           {meeting && buyer ? (
                             <MeetingCell
@@ -293,19 +302,23 @@ function LiveScheduleContent() {
       </div>
 
       {/* Legend */}
-      <footer className="flex flex-wrap items-center gap-4 px-8 py-3 border-t border-gray-800 text-sm text-gray-400">
-        <span className="font-semibold text-gray-300">Status legend:</span>
+      <footer className="flex flex-wrap items-center gap-4 px-8 py-3 bg-white border-t border-gray-200 text-sm text-gray-600">
+        <span className="font-semibold text-gray-900">Status legend:</span>
         <span className="inline-flex items-center gap-2">
-          <span className="w-4 h-4 ring-2 ring-yellow-400 rounded-sm" />
+          <span className="w-4 h-4 ring-2 ring-blue-400 ring-inset bg-white rounded-sm" />
           In progress
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="w-4 h-4 bg-gray-600 rounded-sm line-through">&nbsp;</span>
+          <span className="w-4 h-4 bg-gray-100 border border-gray-300 rounded-sm line-through">&nbsp;</span>
           Completed
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="w-4 h-4 border-l-4 border-red-500 bg-gray-700 rounded-sm" />
+          <span className="w-4 h-4 border-l-4 border-red-600 bg-gray-100 rounded-sm" />
           Delayed / late
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="w-4 h-4 bg-yellow-50 border border-yellow-300 rounded-sm" />
+          Break
         </span>
       </footer>
     </div>
