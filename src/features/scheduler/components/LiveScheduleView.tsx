@@ -232,16 +232,24 @@ function LiveScheduleContent() {
             <p className="text-3xl text-gray-500">No meetings scheduled for this day.</p>
           </div>
         ) : (
-          <table className="w-full border-collapse bg-white">
+          <table className="w-full border-collapse bg-white table-fixed">
+            {/* Time column gets a fixed narrow width; supplier columns share
+                the remaining space equally. */}
+            <colgroup>
+              <col className="w-40" />
+              {daySuppliers.map(s => (
+                <col key={s.id} />
+              ))}
+            </colgroup>
             <thead className="sticky top-0 bg-white z-10 shadow-sm">
               <tr>
-                <th className="text-left px-4 py-4 text-2xl font-semibold border-b border-gray-200 text-gray-900 min-w-[10rem]">
+                <th className="text-left px-4 py-4 text-2xl font-semibold border-b border-gray-200 text-gray-900">
                   Time
                 </th>
                 {daySuppliers.map(s => (
                   <th
                     key={s.id}
-                    className="text-left px-4 py-4 text-3xl xl:text-4xl font-bold border-b border-gray-200 border-l border-gray-200 text-gray-900 min-w-[14rem]"
+                    className="text-left px-4 py-4 text-3xl xl:text-4xl font-bold border-b border-gray-200 border-l border-gray-200 text-gray-900 break-words"
                   >
                     {s.companyName}
                   </th>
