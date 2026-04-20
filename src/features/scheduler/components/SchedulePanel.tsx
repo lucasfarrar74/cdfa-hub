@@ -953,10 +953,10 @@ window.onload = function() { window.print(); };
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-                        <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky left-0 bg-gray-50 dark:bg-gray-700">Time</th>
+                      <tr className="border-b border-gray-200 dark:border-gray-600">
+                        <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky top-0 left-0 bg-gray-50 dark:bg-gray-700 z-20">Time</th>
                         {sortedSuppliers.map(s => (
-                          <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32">
+                          <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10">
                             {s.companyName}
                           </th>
                         ))}

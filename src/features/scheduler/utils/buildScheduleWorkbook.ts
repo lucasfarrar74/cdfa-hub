@@ -115,9 +115,23 @@ export function buildScheduleWorkbook(input: BuildScheduleWorkbookInput): Workbo
   for (const date of dates) {
     const daySlots = meetingSlots.filter(s => s.date === date);
 
-    // Include ALL suppliers so column structure is identical across days —
-    // empty cells make gaps visible rather than hiding them.
-    const daySuppliers = suppliers.slice();
+    // Order suppliers by meeting count on this day (desc), with zero-meeting
+    // suppliers pushed to the far right. Keeps the useful columns in view
+    // without scrolling while still showing the full roster.
+    const dayMeetingCount = (supplierId: string): number =>
+      activeMeetings.reduce((n, m) => {
+        if (m.supplierId !== supplierId) return n;
+        if (!daySlots.some(s => s.id === m.timeSlotId)) return n;
+        return n + 1;
+      }, 0);
+
+    const daySuppliers = suppliers
+      .map(s => ({ supplier: s, count: dayMeetingCount(s.id) }))
+      .sort((a, b) => {
+        if (a.count !== b.count) return b.count - a.count;
+        return a.supplier.companyName.localeCompare(b.supplier.companyName);
+      })
+      .map(x => x.supplier);
     if (daySuppliers.length === 0) continue;
 
     const dayLabel = isMultiDay ? formatDateReadable(date).split(',')[0] : '';
