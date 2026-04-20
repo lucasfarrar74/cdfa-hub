@@ -950,13 +950,13 @@ window.onload = function() { window.print(); };
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
               >
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 overflow-x-auto">
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 overflow-auto max-h-[calc(100vh-14rem)]">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 dark:border-gray-600">
-                        <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky top-0 left-0 bg-gray-50 dark:bg-gray-700 z-20">Time</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 sticky top-0 left-0 bg-gray-50 dark:bg-gray-700 z-20 shadow-[0_1px_0_0_rgba(209,213,219,1)]">Time</th>
                         {sortedSuppliers.map(s => (
-                          <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10">
+                          <th key={s.id} className="px-3 py-2 text-left font-medium text-gray-900 dark:text-gray-100 min-w-32 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10 shadow-[0_1px_0_0_rgba(209,213,219,1)]">
                             {s.companyName}
                           </th>
                         ))}
