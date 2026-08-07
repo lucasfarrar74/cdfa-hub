@@ -356,6 +356,11 @@ export interface ScheduleContextType extends ScheduleState {
 
   // Most recent cloud-sync error (null when healthy or offline).
   lastSyncError: SyncError | null;
+
+  // Warning surfaced when an incoming Firestore snapshot contained a
+  // double-booking — evidence that a concurrent edit race got past the
+  // per-client guards. Null when the last snapshot was clean.
+  remoteIntegrityWarning: string | null;
 }
 
 export interface ScheduleScoreInfo {

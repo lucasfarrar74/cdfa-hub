@@ -17,6 +17,7 @@ import {
   getEffectiveUserId,
 } from '../lib/firebase';
 import type { Project, SyncStatus, ActiveCollaborator, SyncError } from '../types';
+import { findAllDoubleBookings } from '../utils/conflictDetection';
 
 function extractSyncError(err: unknown, operation: SyncError['operation']): SyncError {
   if (err instanceof Error) {
@@ -85,6 +86,15 @@ interface UseFirebaseSyncReturn {
   activeCollaborators: ActiveCollaborator[];
   lastSyncError: SyncError | null;
   reportSyncError: (error: SyncError | null) => void;
+  /**
+   * Non-null when the most recent remote snapshot contained a
+   * double-booking (usually caused by a race between two admins editing
+   * within the 500ms debounce window). Surfaces as a persistent yellow
+   * warning in SyncStatusIndicator until either the state clears
+   * (a subsequent snapshot with no violations arrives) or the admin
+   * runs the audit script to clean up.
+   */
+  remoteIntegrityWarning: string | null;
   uploadProject: (project: Project) => Promise<string | null>;
   openProject: (shareId: string) => Promise<Project | null>;
   syncProject: (project: Project) => void;
@@ -99,6 +109,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaborator[]>([]);
   const [lastSyncError, setLastSyncError] = useState<SyncError | null>(null);
+  const [remoteIntegrityWarning, setRemoteIntegrityWarning] = useState<string | null>(null);
   const reportSyncError = useCallback((err: SyncError | null) => {
     setLastSyncError(err);
   }, []);
@@ -231,6 +242,22 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
           return;
         }
 
+        // Race check: if the remote snapshot arrives with a double-
+        // booking, some concurrent edit slipped through the 500ms
+        // debounce window and produced a stack. The write is accepted
+        // (so we don't lose data) but flagged so the admin knows to
+        // audit + repair.
+        const violations = findAllDoubleBookings(remoteProject.meetings || []);
+        if (violations.length > 0) {
+          const first = violations[0];
+          setRemoteIntegrityWarning(
+            `${violations.length} sync-conflict double-booking${violations.length > 1 ? 's' : ''} detected in incoming data (first: ${first.kind} ${first.partyId.slice(0, 6)} at slot ${first.slotId.slice(0, 6)}). Run the audit script to clean up.`,
+          );
+          console.warn('[remote-integrity]', { count: violations.length, violations });
+        } else {
+          setRemoteIntegrityWarning(null);
+        }
+
         // Notify about remote update
         onProjectUpdate?.(remoteProject);
         setSyncStatus('synced');
@@ -337,6 +364,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     activeCollaborators,
     lastSyncError,
     reportSyncError,
+    remoteIntegrityWarning,
     uploadProject,
     openProject,
     syncProject,

@@ -18,7 +18,14 @@ function humanizeSyncError(err: SyncError): string {
 }
 
 export default function SyncStatusIndicator() {
-  const { activeProject, syncStatus, activeCollaborators, isFirebaseEnabled, lastSyncError } = useSchedule();
+  const {
+    activeProject,
+    syncStatus,
+    activeCollaborators,
+    isFirebaseEnabled,
+    lastSyncError,
+    remoteIntegrityWarning,
+  } = useSchedule();
 
   // Don't show anything if not a cloud project
   if (!activeProject?.isCloud || !isFirebaseEnabled) {
@@ -123,6 +130,19 @@ export default function SyncStatusIndicator() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
         </svg>
       </div>
+
+      {/* Race-check warning: a remote snapshot arrived with double-bookings */}
+      {remoteIntegrityWarning && (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300"
+          title={remoteIntegrityWarning}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="text-xs font-medium">Sync conflict</span>
+        </div>
+      )}
     </div>
   );
 }
