@@ -678,6 +678,37 @@ export function findAvailableSlotForMeeting(
 }
 
 /**
+ * Find the first slot ANYWHERE in the event (not just later than a
+ * specific one) where both the meeting's supplier and buyer are free
+ * and the slot fits the supplier's declared availability. Used by the
+ * integrity resolver to reschedule duplicate meetings.
+ */
+export function findFirstOpenSlot(
+  meeting: Meeting,
+  timeSlots: TimeSlot[],
+  meetings: Meeting[],
+  supplier?: Supplier,
+): TimeSlot | null {
+  const meetingSlots = timeSlots.filter(slot => !slot.isBreak);
+  for (const slot of meetingSlots) {
+    if (supplier) {
+      if (!isSlotInSupplierWindow(slot, supplier)) continue;
+      const days = supplier.selectedDays;
+      if (days && days.length > 0 && !days.includes(slot.date)) continue;
+    }
+    const slotMeetings = meetings.filter(
+      m => m.timeSlotId === slot.id &&
+           m.status !== 'cancelled' &&
+           m.status !== 'bumped'
+    );
+    const supplierBusy = slotMeetings.some(m => m.supplierId === meeting.supplierId);
+    const buyerBusy = slotMeetings.some(m => m.buyerId === meeting.buyerId);
+    if (!supplierBusy && !buyerBusy) return slot;
+  }
+  return null;
+}
+
+/**
  * Find the next available slot after a specific slot where both supplier
  * and buyer are free AND the slot falls inside the supplier's declared
  * availability (their availableFrom / availableTo window and selectedDays).

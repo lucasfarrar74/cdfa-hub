@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolveScheduleStacks, preferenceScoreForMeeting } from './resolveScheduleStacks';
-import { makeSupplier, makeMeeting } from './__testHelpers';
+import { makeSupplier, makeMeeting, makeSlot } from './__testHelpers';
 
 describe('preferenceScoreForMeeting', () => {
   it('scores 3 when include list contains the buyer', () => {
@@ -88,5 +88,73 @@ describe('resolveScheduleStacks', () => {
     ];
     const { cancelledIds } = resolveScheduleStacks(meetings, suppliers);
     expect(cancelledIds).toEqual([]);
+  });
+
+  it('reschedules the loser to a free slot when timeSlots are supplied', () => {
+    // s1 has meetings with b1 and b2 both at slot1. slot2 and slot3 are
+    // empty and both fit. m2 (the loser by alphabetical tiebreak, since
+    // preference='all' → both score 2) should move to slot2.
+    const suppliers = [makeSupplier({ id: 's1', preference: 'all' })];
+    const slots = [
+      makeSlot('slot1', '2024-01-01', 9, 0),
+      makeSlot('slot2', '2024-01-01', 9, 30),
+      makeSlot('slot3', '2024-01-01', 10, 0),
+    ];
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1'),
+    ];
+    const { updatedMeetings, rescheduledIds, cancelledIds } = resolveScheduleStacks(
+      meetings,
+      suppliers,
+      slots,
+    );
+    expect(rescheduledIds).toEqual(['m2']);
+    expect(cancelledIds).toEqual([]);
+    const moved = updatedMeetings.find(m => m.id === 'm2')!;
+    expect(moved.status).toBe('scheduled');
+    expect(moved.timeSlotId).toBe('slot2');
+  });
+
+  it('cancels the loser when no open slot fits within supplier availability', () => {
+    // Supplier can only meet in the 9:00 slot. Both meetings are
+    // already there. slot2 (9:30) and slot3 (10:00) fall outside the
+    // supplier's availability window, so no reschedule is possible.
+    const suppliers = [makeSupplier({ id: 's1', preference: 'all', availableTo: '09:15' })];
+    const slots = [
+      makeSlot('slot1', '2024-01-01', 9, 0),
+      makeSlot('slot2', '2024-01-01', 9, 30),
+      makeSlot('slot3', '2024-01-01', 10, 0),
+    ];
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1'),
+    ];
+    const { rescheduledIds, cancelledIds } = resolveScheduleStacks(meetings, suppliers, slots);
+    expect(rescheduledIds).toEqual([]);
+    expect(cancelledIds).toEqual(['m2']);
+  });
+
+  it('does not reschedule into a slot where the buyer is already booked', () => {
+    // slot2 is empty for s1, but b2 has a different meeting there. The
+    // resolver must skip slot2 and land on slot3 instead.
+    const suppliers = [
+      makeSupplier({ id: 's1', preference: 'all' }),
+      makeSupplier({ id: 's2', preference: 'all' }),
+    ];
+    const slots = [
+      makeSlot('slot1', '2024-01-01', 9, 0),
+      makeSlot('slot2', '2024-01-01', 9, 30),
+      makeSlot('slot3', '2024-01-01', 10, 0),
+    ];
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1'), // loser; b2 is also at slot2 with s2
+      makeMeeting('m3', 's2', 'b2', 'slot2'),
+    ];
+    const { updatedMeetings, rescheduledIds } = resolveScheduleStacks(meetings, suppliers, slots);
+    expect(rescheduledIds).toEqual(['m2']);
+    const moved = updatedMeetings.find(m => m.id === 'm2')!;
+    expect(moved.timeSlotId).toBe('slot3'); // skipped slot2 because b2 was busy
   });
 });

@@ -489,20 +489,25 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }));
   }, [setAppState]);
 
-  // Auto-fix every double-booking in the active project by cancelling
-  // the lower-preference-scoring meeting in each stack. Cancelled
-  // meetings remain in the array with status='cancelled' so nothing is
-  // permanently lost. Returns the number cancelled.
-  const resolveActiveProjectStacks = useCallback((): number => {
-    if (!activeProject) return 0;
-    const { updatedMeetings, cancelledIds } = resolveScheduleStacks(
+  // Auto-fix every double-booking in the active project. For each
+  // stack, keep the highest-preference-scoring meeting and try to
+  // reschedule each loser to a different open slot. If no open slot
+  // fits, the loser is cancelled (recoverable — meeting stays in the
+  // array with status='cancelled'). Returns the counts so the UI can
+  // report what happened.
+  const resolveActiveProjectStacks = useCallback((): { rescheduledCount: number; cancelledCount: number } => {
+    if (!activeProject) return { rescheduledCount: 0, cancelledCount: 0 };
+    const { updatedMeetings, rescheduledIds, cancelledIds } = resolveScheduleStacks(
       activeProject.meetings,
       activeProject.suppliers,
+      activeProject.timeSlots,
     );
-    if (cancelledIds.length === 0) return 0;
+    if (rescheduledIds.length === 0 && cancelledIds.length === 0) {
+      return { rescheduledCount: 0, cancelledCount: 0 };
+    }
     saveToHistory();
     updateActiveProject(project => ({ ...project, meetings: updatedMeetings }));
-    return cancelledIds.length;
+    return { rescheduledCount: rescheduledIds.length, cancelledCount: cancelledIds.length };
   }, [activeProject, saveToHistory, updateActiveProject]);
 
   // Remember the Google Sheet the active project was pushed to, so future

@@ -380,9 +380,11 @@ export interface ScheduleContextType extends ScheduleState {
 
   // One-shot auto-cleanup: for each stack, keep the meeting whose
   // (supplier, buyer) pair best matches the supplier's preferences and
-  // cancel the rest. Cancelled meetings retain status='cancelled' so
-  // they're recoverable. Returns the number cancelled.
-  resolveActiveProjectStacks: () => number;
+  // try to reschedule each loser to a different open slot. Losers with
+  // no valid open slot are cancelled (recoverable — meeting stays in
+  // the array with status='cancelled'). Returns counts so the UI can
+  // report what happened.
+  resolveActiveProjectStacks: () => { rescheduledCount: number; cancelledCount: number };
 }
 
 export interface ScheduleScoreInfo {

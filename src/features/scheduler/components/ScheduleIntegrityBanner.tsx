@@ -23,17 +23,26 @@ export default function ScheduleIntegrityBanner() {
   const handleAutoFix = () => {
     const count = scheduleIntegrityIssues.length;
     const ok = window.confirm(
-      `Auto-cancel ${count} duplicate meeting${count === 1 ? '' : 's'}?\n\n` +
-      `For each stack, the meeting whose buyer is most preferred by the supplier will be kept. ` +
-      `The other meeting will be marked "cancelled" (not deleted — you can restore it by editing the status back to "scheduled").\n\n` +
+      `Auto-fix ${count} double-booking${count === 1 ? '' : 's'}?\n\n` +
+      `For each stack, the meeting whose buyer is most preferred by the supplier is kept. ` +
+      `The other meeting is moved to a different open slot when one is available, ` +
+      `or cancelled if no open slot fits both parties (recoverable — you can restore it ` +
+      `by editing the meeting's status back to "scheduled").\n\n` +
       `Click OK to apply.`,
     );
     if (!ok) return;
     setBusy(true);
     try {
-      const cancelled = resolveActiveProjectStacks();
-      // No further feedback needed — banner disappears once issues clear.
-      console.log(`[integrity-banner] cancelled ${cancelled} duplicate meeting(s)`);
+      const { rescheduledCount, cancelledCount } = resolveActiveProjectStacks();
+      console.log(`[integrity-banner] rescheduled ${rescheduledCount}, cancelled ${cancelledCount}`);
+      // Give the admin an unmistakable summary of what happened.
+      window.alert(
+        `Fixed ${rescheduledCount + cancelledCount} double-booking${
+          rescheduledCount + cancelledCount === 1 ? '' : 's'
+        }:\n` +
+        `  • ${rescheduledCount} rescheduled to another open slot\n` +
+        `  • ${cancelledCount} cancelled (no open slot fit both supplier and buyer)`,
+      );
     } finally {
       setBusy(false);
     }
