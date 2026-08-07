@@ -5,13 +5,24 @@
 //
 // Usage:
 //   node scripts/audit-schedule-integrity.mjs <shareId>          # audit only, no writes
-//   node scripts/audit-schedule-integrity.mjs <shareId> --fix    # cancel the duplicate meeting in each stack
+//   node scripts/audit-schedule-integrity.mjs <shareId> --fix    # cancel the least-preferred duplicate in each stack
 //
-// Fix policy: for each (supplier, slot) or (buyer, slot) stack, KEEP the
-// meeting with the lexicographically-smallest ID (arbitrary but
-// deterministic) and set every other meeting in the stack to
-// status='cancelled'. Cancelled meetings remain in the array so history
-// is preserved and you can restore any that were the wrong choice.
+// Fix policy: for each stack we score every meeting by how well it
+// matches the supplier's preference and keep the highest-scoring one;
+// ties are broken by lexicographically-smallest meeting ID for
+// determinism. Scoring:
+//   3 = supplier.preference='include' AND buyer is in the include list
+//       (this meeting was explicitly wanted)
+//   2 = supplier.preference='all', OR
+//       supplier.preference='exclude' AND buyer is NOT in the exclude list
+//       (accepted by default)
+//   1 = supplier.preference='include' AND buyer NOT in the include list
+//       (buyer wasn't explicitly wanted, likely an accidental duplicate)
+//   0 = supplier.preference='exclude' AND buyer IS in the exclude list
+//       (violates the supplier's stated preference — almost certainly
+//       an accidental duplicate)
+// Cancelled meetings retain status='cancelled' in the array so nothing
+// is lost — you can review and restore any wrong picks.
 //
 // Uses anonymous auth, which is enabled in the Firebase Console and
 // permitted by firestore.rules ("auth != null"). No data leaves your
@@ -43,6 +54,34 @@ function fmtSlot(slot) {
   const hh = String(t.getUTCHours()).padStart(2, '0');
   const mm = String(t.getUTCMinutes()).padStart(2, '0');
   return `${slot.date} ${hh}:${mm}`;
+}
+
+// Score a meeting by how well it matches the supplier's stated
+// preferences. Higher score = more likely to be legitimate.
+// See file header for scoring rules.
+function preferenceScore(meeting, supplier) {
+  if (!supplier) return 2; // no supplier info -> default "accepted" tier
+  const list = supplier.preferenceList || [];
+  const inList = list.includes(meeting.buyerId);
+  const pref = supplier.preference;
+  if (pref === 'include') return inList ? 3 : 1;
+  if (pref === 'exclude') return inList ? 0 : 2;
+  return 2; // 'all' or unknown
+}
+
+// Given a stack of meetings, pick which to KEEP and return the rest.
+// Highest preference score wins; ties broken by lex-smallest id so the
+// choice is stable across runs.
+function pickCancellations(stack, suppliersById) {
+  const scored = stack.map(m => ({
+    m,
+    score: preferenceScore(m, suppliersById.get(m.supplierId)),
+  }));
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.m.id.localeCompare(b.m.id);
+  });
+  return { keep: scored[0], cancel: scored.slice(1) };
 }
 
 async function main() {
@@ -121,18 +160,34 @@ async function main() {
 
   console.log(`[audit] FOUND ${stackedSupplier.length} supplier double-booking(s), ${stackedBuyer.length} buyer double-booking(s)`);
 
-  // Compute the set of meeting IDs to cancel. For each stack, keep the
-  // meeting with the lexicographically-smallest id and cancel the rest.
-  // A meeting may appear in both a supplier stack and a buyer stack, so
-  // we dedupe via a set.
+  // Compute the set of meeting IDs to cancel. For each stack, prefer to
+  // KEEP the meeting whose (supplier, buyer) pair best matches the
+  // supplier's preferences (see preferenceScore). Ties broken by
+  // lex-smallest id for determinism. A meeting may appear in both a
+  // supplier stack and a buyer stack, so we dedupe via a set.
   const toCancel = new Set();
+  const cancelReason = new Map(); // id -> "kept X because ..."
   for (const [, ms] of stackedSupplier) {
-    const sorted = [...ms].sort((a, b) => a.id.localeCompare(b.id));
-    for (const m of sorted.slice(1)) toCancel.add(m.id);
+    const { keep, cancel } = pickCancellations(ms, suppliersById);
+    for (const c of cancel) {
+      toCancel.add(c.m.id);
+      cancelReason.set(
+        c.m.id,
+        `kept ${keep.m.id.slice(0, 8)} (score ${keep.score}) over this one (score ${c.score})`,
+      );
+    }
   }
   for (const [, ms] of stackedBuyer) {
-    const sorted = [...ms].sort((a, b) => a.id.localeCompare(b.id));
-    for (const m of sorted.slice(1)) toCancel.add(m.id);
+    const { keep, cancel } = pickCancellations(ms, suppliersById);
+    for (const c of cancel) {
+      toCancel.add(c.m.id);
+      if (!cancelReason.has(c.m.id)) {
+        cancelReason.set(
+          c.m.id,
+          `kept ${keep.m.id.slice(0, 8)} (score ${keep.score}) over this one (score ${c.score})`,
+        );
+      }
+    }
   }
   console.log(`\n[audit] Would cancel ${toCancel.size} meeting(s) to resolve all stacks.`);
   for (const id of toCancel) {
@@ -140,7 +195,9 @@ async function main() {
     const supplier = suppliersById.get(m?.supplierId);
     const buyer = buyersById.get(m?.buyerId);
     const slot = slotsById.get(m?.timeSlotId);
+    const reason = cancelReason.get(id) || '';
     console.log(`[audit]     - meeting ${id.slice(0, 8)}: ${supplier?.companyName || m?.supplierId} × ${buyer?.name || m?.buyerId} @ ${fmtSlot(slot)}`);
+    if (reason) console.log(`[audit]       ${reason}`);
   }
 
   for (const [key, ms] of stackedSupplier) {
