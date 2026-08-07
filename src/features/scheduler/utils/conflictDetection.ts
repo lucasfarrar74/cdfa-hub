@@ -1,16 +1,9 @@
-import type { Meeting, Supplier, Buyer, TimeSlot } from '../types';
+import type { Meeting, Supplier, Buyer, TimeSlot, DoubleBooking } from '../types';
 import { canSupplierMeetBuyer } from './scheduler';
 
-/**
- * Describes a single (supplier, slot) or (buyer, slot) collision — two
- * active meetings pointing at the same party in the same slot.
- */
-export interface DoubleBooking {
-  kind: 'supplier' | 'buyer';
-  partyId: string;
-  slotId: string;
-  meetingIds: string[];
-}
+// Re-export so existing consumers of `import { DoubleBooking } from '.../conflictDetection'`
+// don't have to change their import paths.
+export type { DoubleBooking };
 
 /**
  * Scan an entire meetings array and return every double-booking

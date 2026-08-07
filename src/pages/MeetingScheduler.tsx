@@ -9,6 +9,7 @@ import {
   ExportPanel,
   ProjectSidebar,
   ScheduleErrorToast,
+  ScheduleIntegrityBanner,
   SyncStatusIndicator,
   KeyboardShortcutsHelp,
   NotificationSettings,
@@ -158,6 +159,7 @@ function SchedulerContent() {
           {activeTab === 'preferences' && <PreferencesPanel />}
           {activeTab === 'schedule' && (
             <div className="space-y-6">
+              <ScheduleIntegrityBanner />
               <SchedulePanel />
               <ExportPanel />
             </div>

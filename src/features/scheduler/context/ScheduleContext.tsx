@@ -31,6 +31,7 @@ import {
   getScheduleConflictsSummary,
   isSupplierAvailableAtSlot,
   detectFirstDoubleBooking,
+  findAllDoubleBookings,
 } from '../utils/conflictDetection';
 
 // Generate unique ID
@@ -252,6 +253,14 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     if (!appState.activeProjectId) return null;
     return appState.projects.find(p => p.id === appState.activeProjectId) ?? null;
   }, [appState.projects, appState.activeProjectId]);
+
+  // Live integrity check — surfaces stacked meetings from any source
+  // (pre-existing bug damage, corrupted import, sync race, etc.).
+  // The schedule view mounts a banner when this is non-empty.
+  const scheduleIntegrityIssues = useMemo(() => {
+    if (!activeProject) return [];
+    return findAllDoubleBookings(activeProject.meetings || []);
+  }, [activeProject]);
 
   // Firebase sync
   const handleRemoteProjectUpdate = useCallback((remoteProject: Project) => {
@@ -1219,6 +1228,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     mutationError,
     clearMutationError,
 
+    // Live schedule-integrity report (double-bookings from any source)
+    scheduleIntegrityIssues,
+
     // Import/Export
     exportToJSON,
     importFromJSON,
@@ -1286,6 +1298,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setActiveProjectSheetsLink,
     mutationError,
     clearMutationError,
+    scheduleIntegrityIssues,
     exportToJSON,
     importFromJSON,
     exportProjectToJSON,

@@ -222,6 +222,16 @@ export interface MeetingNote {
   timestamp: string;
 }
 
+// Reports a single (supplier, slot) or (buyer, slot) collision — two
+// active meetings scheduled for the same party in the same slot. This
+// is the schedule-integrity invariant the write-time guards enforce.
+export interface DoubleBooking {
+  kind: 'supplier' | 'buyer';
+  partyId: string;
+  slotId: string;
+  meetingIds: string[];
+}
+
 // App-level state for managing multiple projects
 export interface AppState {
   projects: Project[];
@@ -361,6 +371,12 @@ export interface ScheduleContextType extends ScheduleState {
   // double-booking — evidence that a concurrent edit race got past the
   // per-client guards. Null when the last snapshot was clean.
   remoteIntegrityWarning: string | null;
+
+  // Every double-booking currently present in the active project's
+  // meetings. Computed on every render — the schedule panel surfaces a
+  // banner when this is non-empty, regardless of how the stacks got
+  // there (past bug, corrupted import, sync race, etc.).
+  scheduleIntegrityIssues: DoubleBooking[];
 }
 
 export interface ScheduleScoreInfo {
