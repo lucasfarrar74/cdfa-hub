@@ -377,6 +377,12 @@ export interface ScheduleContextType extends ScheduleState {
   // banner when this is non-empty, regardless of how the stacks got
   // there (past bug, corrupted import, sync race, etc.).
   scheduleIntegrityIssues: DoubleBooking[];
+
+  // One-shot auto-cleanup: for each stack, keep the meeting whose
+  // (supplier, buyer) pair best matches the supplier's preferences and
+  // cancel the rest. Cancelled meetings retain status='cancelled' so
+  // they're recoverable. Returns the number cancelled.
+  resolveActiveProjectStacks: () => number;
 }
 
 export interface ScheduleScoreInfo {

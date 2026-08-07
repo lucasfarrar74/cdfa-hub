@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import { isLegacySupplier, migrateSupplier, isLegacyEventConfig, migrateEventConfig } from '../types';
 import { autoFillCancelledSlots, bumpMeetingToLaterSlot, findNextAvailableSlotAfter } from '../utils/scheduler';
+import { resolveScheduleStacks } from '../utils/resolveScheduleStacks';
 import { assignBuyerColors } from '../utils/colors';
 import {
   checkMoveConflicts as checkMoveConflictsUtil,
@@ -487,6 +488,22 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       ),
     }));
   }, [setAppState]);
+
+  // Auto-fix every double-booking in the active project by cancelling
+  // the lower-preference-scoring meeting in each stack. Cancelled
+  // meetings remain in the array with status='cancelled' so nothing is
+  // permanently lost. Returns the number cancelled.
+  const resolveActiveProjectStacks = useCallback((): number => {
+    if (!activeProject) return 0;
+    const { updatedMeetings, cancelledIds } = resolveScheduleStacks(
+      activeProject.meetings,
+      activeProject.suppliers,
+    );
+    if (cancelledIds.length === 0) return 0;
+    saveToHistory();
+    updateActiveProject(project => ({ ...project, meetings: updatedMeetings }));
+    return cancelledIds.length;
+  }, [activeProject, saveToHistory, updateActiveProject]);
 
   // Remember the Google Sheet the active project was pushed to, so future
   // pushes update the same Sheet instead of creating a new one each time.
@@ -1230,6 +1247,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // Live schedule-integrity report (double-bookings from any source)
     scheduleIntegrityIssues,
+    resolveActiveProjectStacks,
 
     // Import/Export
     exportToJSON,
@@ -1299,6 +1317,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     mutationError,
     clearMutationError,
     scheduleIntegrityIssues,
+    resolveActiveProjectStacks,
     exportToJSON,
     importFromJSON,
     exportProjectToJSON,

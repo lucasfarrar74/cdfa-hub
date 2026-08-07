@@ -14,10 +14,30 @@ import { formatTime } from '../utils/timeUtils';
  * to clean up before the schedule is used at an event.
  */
 export default function ScheduleIntegrityBanner() {
-  const { scheduleIntegrityIssues, activeProject } = useSchedule();
+  const { scheduleIntegrityIssues, activeProject, resolveActiveProjectStacks } = useSchedule();
   const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   if (!activeProject || scheduleIntegrityIssues.length === 0) return null;
+
+  const handleAutoFix = () => {
+    const count = scheduleIntegrityIssues.length;
+    const ok = window.confirm(
+      `Auto-cancel ${count} duplicate meeting${count === 1 ? '' : 's'}?\n\n` +
+      `For each stack, the meeting whose buyer is most preferred by the supplier will be kept. ` +
+      `The other meeting will be marked "cancelled" (not deleted — you can restore it by editing the status back to "scheduled").\n\n` +
+      `Click OK to apply.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const cancelled = resolveActiveProjectStacks();
+      // No further feedback needed — banner disappears once issues clear.
+      console.log(`[integrity-banner] cancelled ${cancelled} duplicate meeting(s)`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const suppliersById = new Map(activeProject.suppliers.map(s => [s.id, s]));
   const buyersById = new Map(activeProject.buyers.map(b => [b.id, b]));
@@ -50,19 +70,25 @@ export default function ScheduleIntegrityBanner() {
           <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
             One or more meetings are stacked — the same party is scheduled twice in the same
             slot. This is data left over from an older bug that has since been fixed
-            (write-time guards now prevent new stacks). Review the list below and cancel
-            duplicates you don't want, or run{' '}
-            <code className="text-xs bg-amber-100 dark:bg-amber-950 px-1 py-0.5 rounded">
-              node scripts/audit-schedule-integrity.mjs {activeProject.shareId || '<shareId>'} --fix
-            </code>{' '}
-            to auto-cancel one duplicate per stack.
+            (write-time guards now prevent new stacks). Click <strong>Auto-fix</strong> to
+            cancel the duplicate in each stack (keeps the one whose buyer is most preferred
+            by the supplier), or <strong>Show details</strong> to review manually first.
           </p>
-          <button
-            onClick={() => setExpanded(v => !v)}
-            className="mt-2 text-sm font-medium text-amber-900 dark:text-amber-200 underline hover:text-amber-700 dark:hover:text-amber-100"
-          >
-            {expanded ? 'Hide details' : 'Show details'}
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={handleAutoFix}
+              disabled={busy}
+              className="inline-flex items-center px-3 py-1.5 text-sm font-semibold bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-md transition-colors"
+            >
+              {busy ? 'Fixing…' : `Auto-fix (${count})`}
+            </button>
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-amber-100 hover:bg-amber-200 dark:bg-amber-950 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 rounded-md transition-colors"
+            >
+              {expanded ? 'Hide details' : 'Show details'}
+            </button>
+          </div>
 
           {expanded && (
             <ul className="mt-3 space-y-2 text-sm text-amber-900 dark:text-amber-200">
