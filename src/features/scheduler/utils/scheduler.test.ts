@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isSlotInSupplierWindow, canSupplierMeetBuyer } from './scheduler';
-import { makeSupplier, makeSlot } from './__testHelpers';
+import { isSlotInSupplierWindow, canSupplierMeetBuyer, findNextAvailableSlotAfter, bumpMeetingToLaterSlot } from './scheduler';
+import { makeSupplier, makeSlot, makeMeeting } from './__testHelpers';
 
 describe('isSlotInSupplierWindow', () => {
   it('returns true when supplier has no time window', () => {
@@ -46,5 +46,73 @@ describe('canSupplierMeetBuyer', () => {
     const supplier = makeSupplier({ preference: 'exclude', preferenceList: ['b1'] });
     expect(canSupplierMeetBuyer(supplier, 'b1')).toBe(false);
     expect(canSupplierMeetBuyer(supplier, 'b2')).toBe(true);
+  });
+});
+
+describe('findNextAvailableSlotAfter', () => {
+  const slots = [
+    makeSlot('slot1', '2024-01-01', 9, 0),
+    makeSlot('slot2', '2024-01-01', 9, 30),
+    makeSlot('slot3', '2024-01-01', 10, 0),
+    makeSlot('slot4', '2024-01-01', 10, 30),
+    makeSlot('slot5', '2024-01-01', 11, 0),
+  ];
+
+  it('finds the next open slot when supplier and buyer are both free', () => {
+    const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
+    const next = findNextAvailableSlotAfter(meeting, slots, [meeting], 'slot1');
+    expect(next?.id).toBe('slot2');
+  });
+
+  it('skips slots outside the supplier availability window', () => {
+    // Supplier can only meet until 10:00 — slots 3, 4, 5 should be skipped.
+    const supplier = makeSupplier({ id: 's1', availableTo: '10:00' });
+    const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
+    const next = findNextAvailableSlotAfter(meeting, slots, [meeting], 'slot1', supplier);
+    // Only slot2 (9:30) is left inside the window
+    expect(next?.id).toBe('slot2');
+    // From slot2, there are no more in-window slots
+    expect(findNextAvailableSlotAfter(meeting, slots, [meeting], 'slot2', supplier)).toBeNull();
+  });
+
+  it('skips days the supplier is not attending', () => {
+    const daySlots = [
+      makeSlot('slot1', '2024-01-01', 9, 0),
+      makeSlot('slot2', '2024-01-02', 9, 0),
+    ];
+    const supplier = makeSupplier({ id: 's1', selectedDays: ['2024-01-01'] });
+    const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
+    const next = findNextAvailableSlotAfter(meeting, daySlots, [meeting], 'slot1', supplier);
+    // slot2 is on 2024-01-02, which the supplier didn't select; expect no result
+    expect(next).toBeNull();
+  });
+});
+
+describe('bumpMeetingToLaterSlot', () => {
+  const slots = [
+    makeSlot('slot1', '2024-01-01', 9, 0),
+    makeSlot('slot2', '2024-01-01', 9, 30),
+    makeSlot('slot3', '2024-01-01', 10, 0),
+  ];
+
+  it('marks the original meeting bumped and adds a new one at the next slot', () => {
+    const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
+    const suppliers = [makeSupplier({ id: 's1' })];
+    const result = bumpMeetingToLaterSlot('m1', [meeting], slots, suppliers);
+    expect(result.success).toBe(true);
+    expect(result.newSlotId).toBe('slot2');
+    const bumped = result.updatedMeetings.find(m => m.id === 'm1');
+    expect(bumped?.status).toBe('bumped');
+    const rescheduled = result.updatedMeetings.find(m => m.id !== 'm1');
+    expect(rescheduled?.timeSlotId).toBe('slot2');
+    expect(rescheduled?.status).toBe('scheduled');
+  });
+
+  it('refuses to bump into a slot outside supplier availability', () => {
+    const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
+    // Only slot1 is inside window; slot2 (9:30) and slot3 (10:00) are not.
+    const suppliers = [makeSupplier({ id: 's1', availableTo: '09:30' })];
+    const result = bumpMeetingToLaterSlot('m1', [meeting], slots, suppliers);
+    expect(result.success).toBe(false);
   });
 });

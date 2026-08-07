@@ -30,11 +30,25 @@ import {
   getConflictsForMeeting,
   getScheduleConflictsSummary,
   isSupplierAvailableAtSlot,
+  detectFirstDoubleBooking,
 } from '../utils/conflictDetection';
 
 // Generate unique ID
 function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
+}
+
+// Format a DoubleBooking violation into a short human message for the
+// toast. Falls back to IDs if names aren't available.
+function describeViolationForToast(
+  violation: { kind: 'supplier' | 'buyer'; partyId: string; slotId: string },
+  project: Project,
+): string {
+  const party = violation.kind === 'supplier'
+    ? project.suppliers.find(s => s.id === violation.partyId)?.companyName
+    : project.buyers.find(b => b.id === violation.partyId)?.name;
+  const partyLabel = party || `${violation.kind} ${violation.partyId.slice(0, 6)}`;
+  return `Move blocked: ${partyLabel} already has a meeting in that slot.`;
 }
 
 // Create a new empty project
@@ -215,6 +229,11 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // Schedule optimization state
   const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastScheduleScore, setLastScheduleScore] = useState<ScheduleScoreInfo | null>(null);
+
+  // Rejection message from a mutation guard (double-booking, etc.).
+  // The scheduler page mounts <ScheduleErrorToast> which subscribes.
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const clearMutationError = useCallback(() => setMutationError(null), []);
 
   // Create default project if none exist
   useEffect(() => {
@@ -632,32 +651,46 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   }, [saveToHistory, updateActiveProject]);
 
   const swapMeetings = useCallback((meetingId1: string, meetingId2: string) => {
-    saveToHistory();
-    updateActiveProject(project => {
-      const meeting1 = project.meetings.find(m => m.id === meetingId1);
-      const meeting2 = project.meetings.find(m => m.id === meetingId2);
-      if (!meeting1 || !meeting2) return project;
+    if (!activeProject) return;
+    const meeting1 = activeProject.meetings.find(m => m.id === meetingId1);
+    const meeting2 = activeProject.meetings.find(m => m.id === meetingId2);
+    if (!meeting1 || !meeting2) return;
 
-      return {
-        ...project,
-        meetings: project.meetings.map(m => {
-          if (m.id === meetingId1) return { ...m, timeSlotId: meeting2.timeSlotId };
-          if (m.id === meetingId2) return { ...m, timeSlotId: meeting1.timeSlotId };
-          return m;
-        }),
-      };
+    const nextMeetings = activeProject.meetings.map(m => {
+      if (m.id === meetingId1) return { ...m, timeSlotId: meeting2.timeSlotId };
+      if (m.id === meetingId2) return { ...m, timeSlotId: meeting1.timeSlotId };
+      return m;
     });
-  }, [saveToHistory, updateActiveProject]);
+
+    const violation = detectFirstDoubleBooking(nextMeetings);
+    if (violation) {
+      const msg = describeViolationForToast(violation, activeProject);
+      console.warn('[schedule-guard] swap blocked:', msg, violation);
+      setMutationError(msg);
+      return;
+    }
+
+    saveToHistory();
+    updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
+  }, [activeProject, saveToHistory, updateActiveProject]);
 
   const moveMeeting = useCallback((meetingId: string, newTimeSlotId: string) => {
+    if (!activeProject) return;
+    const nextMeetings = activeProject.meetings.map(m =>
+      m.id === meetingId ? { ...m, timeSlotId: newTimeSlotId } : m,
+    );
+
+    const violation = detectFirstDoubleBooking(nextMeetings);
+    if (violation) {
+      const msg = describeViolationForToast(violation, activeProject);
+      console.warn('[schedule-guard] move blocked:', msg, violation);
+      setMutationError(msg);
+      return;
+    }
+
     saveToHistory();
-    updateActiveProject(project => ({
-      ...project,
-      meetings: project.meetings.map(m =>
-        m.id === meetingId ? { ...m, timeSlotId: newTimeSlotId } : m
-      ),
-    }));
-  }, [saveToHistory, updateActiveProject]);
+    updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
+  }, [activeProject, saveToHistory, updateActiveProject]);
 
   const cancelMeeting = useCallback((meetingId: string) => {
     saveToHistory();
@@ -735,9 +768,21 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       return { success: false, message: 'No active project' };
     }
 
-    const result = bumpMeetingToLaterSlot(meetingId, activeProject.meetings, activeProject.timeSlots);
+    const result = bumpMeetingToLaterSlot(
+      meetingId,
+      activeProject.meetings,
+      activeProject.timeSlots,
+      activeProject.suppliers,
+    );
 
     if (result.success) {
+      const violation = detectFirstDoubleBooking(result.updatedMeetings);
+      if (violation) {
+        const msg = describeViolationForToast(violation, activeProject);
+        console.warn('[schedule-guard] bump blocked:', msg, violation);
+        setMutationError(msg);
+        return { success: false, message: msg };
+      }
       saveToHistory();
       updateActiveProject(project => ({
         ...project,
@@ -758,11 +803,13 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     const meeting = activeProject.meetings.find(m => m.id === meetingId);
     if (!meeting) return null;
 
+    const supplier = activeProject.suppliers.find(s => s.id === meeting.supplierId);
     const slot = findNextAvailableSlotAfter(
       meeting,
       activeProject.timeSlots,
       activeProject.meetings,
-      meeting.timeSlotId
+      meeting.timeSlotId,
+      supplier,
     );
 
     return slot?.id ?? null;
@@ -801,7 +848,22 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     // Check if supplier slot is available (hard error)
     if (!isSupplierAvailableAtSlot(supplierId, timeSlotId, activeProject.meetings)) {
-      return { success: false, message: 'Supplier already has a meeting at this time' };
+      const msg = 'Supplier already has a meeting at this time';
+      setMutationError(msg);
+      return { success: false, message: msg };
+    }
+    // Also block if the buyer is already in this slot with someone else.
+    const buyerAlreadyBooked = activeProject.meetings.some(
+      m =>
+        m.buyerId === buyerId &&
+        m.timeSlotId === timeSlotId &&
+        m.status !== 'cancelled' &&
+        m.status !== 'bumped',
+    );
+    if (buyerAlreadyBooked) {
+      const msg = 'Buyer already has a meeting at this time';
+      setMutationError(msg);
+      return { success: false, message: msg };
     }
 
     saveToHistory();
@@ -1152,6 +1214,10 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     // Google Sheets link persistence
     setActiveProjectSheetsLink,
 
+    // Mutation guard toast
+    mutationError,
+    clearMutationError,
+
     // Import/Export
     exportToJSON,
     importFromJSON,
@@ -1216,6 +1282,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     findNextAvailableSlotAction,
     addMeetingNote,
     setActiveProjectSheetsLink,
+    mutationError,
+    clearMutationError,
     exportToJSON,
     importFromJSON,
     exportProjectToJSON,

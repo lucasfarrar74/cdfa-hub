@@ -8,6 +8,7 @@ import {
   SchedulePanel,
   ExportPanel,
   ProjectSidebar,
+  ScheduleErrorToast,
   SyncStatusIndicator,
   KeyboardShortcutsHelp,
   NotificationSettings,
@@ -163,6 +164,10 @@ function SchedulerContent() {
           )}
         </main>
       </div>
+
+      {/* Guard-rejection toast (double-booking blocks, etc.) — sits over
+          any tab; only renders when a mutation was refused. */}
+      <ScheduleErrorToast />
     </div>
   );
 }

@@ -1,6 +1,61 @@
 import type { Meeting, Supplier, Buyer, TimeSlot } from '../types';
 import { canSupplierMeetBuyer } from './scheduler';
 
+/**
+ * Describes a single (supplier, slot) or (buyer, slot) collision — two
+ * active meetings pointing at the same party in the same slot.
+ */
+export interface DoubleBooking {
+  kind: 'supplier' | 'buyer';
+  partyId: string;
+  slotId: string;
+  meetingIds: string[];
+}
+
+/**
+ * Scan an entire meetings array and return every double-booking
+ * detected. A "double-booking" is two or more active meetings
+ * (status not cancelled/bumped) sharing the same supplier+slot or
+ * buyer+slot. This is the invariant the guards in ScheduleContext
+ * enforce; it also powers the offline audit script.
+ */
+export function findAllDoubleBookings(meetings: Meeting[]): DoubleBooking[] {
+  const supplierBuckets = new Map<string, Meeting[]>();
+  const buyerBuckets = new Map<string, Meeting[]>();
+  for (const m of meetings) {
+    if (m.status === 'cancelled' || m.status === 'bumped') continue;
+    const sKey = `${m.supplierId}|${m.timeSlotId}`;
+    const bKey = `${m.buyerId}|${m.timeSlotId}`;
+    if (!supplierBuckets.has(sKey)) supplierBuckets.set(sKey, []);
+    supplierBuckets.get(sKey)!.push(m);
+    if (!buyerBuckets.has(bKey)) buyerBuckets.set(bKey, []);
+    buyerBuckets.get(bKey)!.push(m);
+  }
+  const results: DoubleBooking[] = [];
+  for (const [key, ms] of supplierBuckets) {
+    if (ms.length > 1) {
+      const [supplierId, slotId] = key.split('|');
+      results.push({ kind: 'supplier', partyId: supplierId, slotId, meetingIds: ms.map(m => m.id) });
+    }
+  }
+  for (const [key, ms] of buyerBuckets) {
+    if (ms.length > 1) {
+      const [buyerId, slotId] = key.split('|');
+      results.push({ kind: 'buyer', partyId: buyerId, slotId, meetingIds: ms.map(m => m.id) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Return the first double-booking in the array, or null. Used as a
+ * write-time guard: mutations compute their intended new meetings
+ * array, run this, and refuse to commit if it returns non-null.
+ */
+export function detectFirstDoubleBooking(meetings: Meeting[]): DoubleBooking | null {
+  return findAllDoubleBookings(meetings)[0] ?? null;
+}
+
 export interface ConflictInfo {
   type: 'supplier_busy' | 'buyer_busy' | 'preference_violation';
   severity: 'error' | 'warning';

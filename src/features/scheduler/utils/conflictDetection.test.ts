@@ -6,6 +6,8 @@ import {
   checkMoveConflicts,
   getScheduleConflictsSummary,
   getConflictsForMeeting,
+  findAllDoubleBookings,
+  detectFirstDoubleBooking,
 } from './conflictDetection';
 import { makeSupplier, makeBuyer, makeSlot, makeMeeting } from './__testHelpers';
 
@@ -164,5 +166,54 @@ describe('getConflictsForMeeting', () => {
     const meeting = makeMeeting('m1', 's1', 'b1', 'slot1');
     const conflicts = getConflictsForMeeting(meeting, [meeting], suppliers, buyers);
     expect(conflicts.some(c => c.type === 'preference_violation')).toBe(true);
+  });
+});
+
+describe('findAllDoubleBookings / detectFirstDoubleBooking', () => {
+  it('returns empty when no meetings collide', () => {
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot2'),
+    ];
+    expect(findAllDoubleBookings(meetings)).toEqual([]);
+    expect(detectFirstDoubleBooking(meetings)).toBeNull();
+  });
+
+  it('flags supplier stacked twice at the same slot', () => {
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1'),
+    ];
+    const dbs = findAllDoubleBookings(meetings);
+    expect(dbs.length).toBe(1);
+    expect(dbs[0]).toMatchObject({ kind: 'supplier', partyId: 's1', slotId: 'slot1' });
+    expect(dbs[0].meetingIds.sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('flags buyer stacked twice at the same slot', () => {
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's2', 'b1', 'slot1'),
+    ];
+    const dbs = findAllDoubleBookings(meetings);
+    expect(dbs.some(d => d.kind === 'buyer' && d.partyId === 'b1')).toBe(true);
+  });
+
+  it('ignores cancelled and bumped meetings when scanning', () => {
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1', 'cancelled'),
+      makeMeeting('m3', 's1', 'b3', 'slot1', 'bumped'),
+    ];
+    expect(findAllDoubleBookings(meetings)).toEqual([]);
+  });
+
+  it('reports the first violation from detectFirstDoubleBooking', () => {
+    const meetings = [
+      makeMeeting('m1', 's1', 'b1', 'slot1'),
+      makeMeeting('m2', 's1', 'b2', 'slot1'),
+    ];
+    const first = detectFirstDoubleBooking(meetings);
+    expect(first?.slotId).toBe('slot1');
   });
 });

@@ -14,6 +14,7 @@ export { default as PreferenceFormPanel } from './PreferenceFormPanel';
 export { default as PreferencesPanel } from './PreferencesPanel';
 export { default as ProjectSidebar } from './ProjectSidebar';
 export { default as SchedulePanel } from './SchedulePanel';
+export { default as ScheduleErrorToast } from './ScheduleErrorToast';
 export { default as ShareDialog } from './ShareDialog';
 export { default as StatusDashboard } from './StatusDashboard';
 export { default as SyncStatusIndicator } from './SyncStatusIndicator';

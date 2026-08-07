@@ -324,6 +324,11 @@ export interface ScheduleContextType extends ScheduleState {
   // Google Sheets export link persistence
   setActiveProjectSheetsLink: (googleSheetsId: string, googleSheetsUrl: string) => void;
 
+  // Guard-rejection message from the last blocked mutation (double-booking
+  // etc.). The scheduler page mounts <ScheduleErrorToast> which subscribes.
+  mutationError: string | null;
+  clearMutationError: () => void;
+
   // Import/Export
   exportToJSON: () => string;
   importFromJSON: (json: string) => void;

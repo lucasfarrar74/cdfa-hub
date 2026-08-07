@@ -678,13 +678,21 @@ export function findAvailableSlotForMeeting(
 }
 
 /**
- * Find the next available slot after a specific slot where both supplier and buyer are free
+ * Find the next available slot after a specific slot where both supplier
+ * and buyer are free AND the slot falls inside the supplier's declared
+ * availability (their availableFrom / availableTo window and selectedDays).
+ *
+ * The optional `supplier` argument enables the window/day filtering.
+ * If omitted, only the free-supplier/free-buyer check runs — kept for
+ * back-compat with any callers that don't have the Supplier record
+ * handy, though bumping without it can produce out-of-window slots.
  */
 export function findNextAvailableSlotAfter(
   meeting: Meeting,
   timeSlots: TimeSlot[],
   meetings: Meeting[],
-  afterSlotId: string
+  afterSlotId: string,
+  supplier?: Supplier,
 ): TimeSlot | null {
   const meetingSlots = timeSlots.filter(slot => !slot.isBreak);
 
@@ -696,6 +704,14 @@ export function findNextAvailableSlotAfter(
   const laterSlots = meetingSlots.slice(afterSlotIndex + 1);
 
   for (const slot of laterSlots) {
+    // Supplier availability: outside their time window or not on a
+    // day they've said they're attending? Skip.
+    if (supplier) {
+      if (!isSlotInSupplierWindow(slot, supplier)) continue;
+      const days = supplier.selectedDays;
+      if (days && days.length > 0 && !days.includes(slot.date)) continue;
+    }
+
     const slotMeetings = meetings.filter(
       m => m.timeSlotId === slot.id &&
            m.status !== 'cancelled' &&
@@ -720,7 +736,8 @@ export function findNextAvailableSlotAfter(
 export function bumpMeetingToLaterSlot(
   meetingId: string,
   meetings: Meeting[],
-  timeSlots: TimeSlot[]
+  timeSlots: TimeSlot[],
+  suppliers?: Supplier[],
 ): {
   updatedMeetings: Meeting[];
   success: boolean;
@@ -736,8 +753,10 @@ export function bumpMeetingToLaterSlot(
     return { updatedMeetings: meetings, success: false, message: 'Cannot bump cancelled or already bumped meeting' };
   }
 
-  // Find the next available slot
-  const nextSlot = findNextAvailableSlotAfter(meeting, timeSlots, meetings, meeting.timeSlotId);
+  // Find the next available slot, honoring the supplier's availability
+  // window when the supplier record is available to the caller.
+  const supplier = suppliers?.find(s => s.id === meeting.supplierId);
+  const nextSlot = findNextAvailableSlotAfter(meeting, timeSlots, meetings, meeting.timeSlotId, supplier);
 
   if (!nextSlot) {
     return {
