@@ -137,6 +137,10 @@ export function useHistory<T>(
  */
 export interface HistoryTracker<T> {
   push: (state: T, label?: string) => void;
+  /** Return the snapshot `undo()` would restore without mutating history. */
+  peekPast: () => T | null;
+  /** Return the snapshot `redo()` would restore without mutating history. */
+  peekFuture: () => T | null;
   undo: () => T | null;
   redo: () => T | null;
   canUndo: boolean;
@@ -164,6 +168,14 @@ export function useHistoryTracker<T>(maxHistory = 20): HistoryTracker<T> {
     currentRef.current = state;
     setFuture([]); // Clear future on new action
   }, [maxHistory]);
+
+  const peekPast = useCallback((): T | null => {
+    return past.length > 0 ? past[past.length - 1] : null;
+  }, [past]);
+
+  const peekFuture = useCallback((): T | null => {
+    return future.length > 0 ? future[0] : null;
+  }, [future]);
 
   const undo = useCallback((): T | null => {
     if (past.length === 0) return null;
@@ -203,6 +215,8 @@ export function useHistoryTracker<T>(maxHistory = 20): HistoryTracker<T> {
 
   return {
     push,
+    peekPast,
+    peekFuture,
     undo,
     redo,
     canUndo: past.length > 0,

@@ -263,15 +263,45 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     return findAllDoubleBookings(activeProject.meetings || []);
   }, [activeProject]);
 
-  // Firebase sync
+  // Latest appState in a ref so `handleRemoteProjectUpdate` can compare
+  // incoming remote data against our current local state without
+  // recreating the callback (which would tear down the Firestore
+  // subscription on every state change).
+  const appStateRef = useRef(appState);
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
+
+  // Firebase sync. When a remote snapshot actually diverges from our
+  // local state (i.e. is not just an echo of our own write), the local
+  // undo history becomes stale — any snapshot in it pre-dates edits we
+  // now know about, so applying it via Undo could silently wipe a
+  // teammate's change. Clear the history to force the user to re-do
+  // any correction against the fresh state.
   const handleRemoteProjectUpdate = useCallback((remoteProject: Project) => {
+    const currentLocal = appStateRef.current.projects.find(
+      p => p.shareId === remoteProject.shareId,
+    );
+    const meetingsChanged =
+      !currentLocal ||
+      JSON.stringify(currentLocal.meetings) !== JSON.stringify(remoteProject.meetings);
+    const slotsChanged =
+      !currentLocal ||
+      JSON.stringify(currentLocal.timeSlots) !== JSON.stringify(remoteProject.timeSlots);
+    const contentDiverged = meetingsChanged || slotsChanged;
+
     setAppState(prev => ({
       ...prev,
       projects: prev.projects.map(p =>
         p.shareId === remoteProject.shareId ? remoteProject : p
       ),
     }));
-  }, [setAppState]);
+
+    if (contentDiverged) {
+      historyTracker.clear();
+      setHistoryState({ canUndo: false, canRedo: false });
+    }
+  }, [setAppState, historyTracker]);
 
   const {
     isEnabled: isFirebaseEnabled,
@@ -375,32 +405,55 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setHistoryState({ canUndo: true, canRedo: false });
   }, [activeProject, historyTracker]);
 
-  // Undo last operation
+  // Undo last operation. Peeks the snapshot first and runs the same
+  // double-booking guard used by write mutations — if restoring the
+  // snapshot would create a stack (e.g. a teammate's change landed after
+  // the snapshot was pushed and now collides with what it would
+  // restore), refuse the undo, clear the now-stale history, and surface
+  // a red toast instead of silently corrupting the schedule.
   const undo = useCallback(() => {
-    const snapshot = historyTracker.undo();
-    if (snapshot) {
-      updateActiveProject(project => ({
-        ...project,
-        meetings: snapshot.meetings,
-        timeSlots: snapshot.timeSlots,
-        unscheduledPairs: snapshot.unscheduledPairs,
-      }));
-      setHistoryState({ canUndo: historyTracker.canUndo, canRedo: historyTracker.canRedo });
+    const snapshot = historyTracker.peekPast();
+    if (!snapshot) return;
+    const violation = detectFirstDoubleBooking(snapshot.meetings);
+    if (violation) {
+      setMutationError(
+        'Undo blocked: reverting would create a double-booking (a teammate may have edited the schedule since). Undo history has been cleared.',
+      );
+      historyTracker.clear();
+      setHistoryState({ canUndo: false, canRedo: false });
+      return;
     }
+    historyTracker.undo();
+    updateActiveProject(project => ({
+      ...project,
+      meetings: snapshot.meetings,
+      timeSlots: snapshot.timeSlots,
+      unscheduledPairs: snapshot.unscheduledPairs,
+    }));
+    setHistoryState({ canUndo: historyTracker.canUndo, canRedo: historyTracker.canRedo });
   }, [historyTracker, updateActiveProject]);
 
-  // Redo last undone operation
+  // Redo last undone operation. Same guard as undo.
   const redo = useCallback(() => {
-    const snapshot = historyTracker.redo();
-    if (snapshot) {
-      updateActiveProject(project => ({
-        ...project,
-        meetings: snapshot.meetings,
-        timeSlots: snapshot.timeSlots,
-        unscheduledPairs: snapshot.unscheduledPairs,
-      }));
-      setHistoryState({ canUndo: historyTracker.canUndo, canRedo: historyTracker.canRedo });
+    const snapshot = historyTracker.peekFuture();
+    if (!snapshot) return;
+    const violation = detectFirstDoubleBooking(snapshot.meetings);
+    if (violation) {
+      setMutationError(
+        'Redo blocked: re-applying would create a double-booking (a teammate may have edited the schedule since). Redo history has been cleared.',
+      );
+      historyTracker.clear();
+      setHistoryState({ canUndo: false, canRedo: false });
+      return;
     }
+    historyTracker.redo();
+    updateActiveProject(project => ({
+      ...project,
+      meetings: snapshot.meetings,
+      timeSlots: snapshot.timeSlots,
+      unscheduledPairs: snapshot.unscheduledPairs,
+    }));
+    setHistoryState({ canUndo: historyTracker.canUndo, canRedo: historyTracker.canRedo });
   }, [historyTracker, updateActiveProject]);
 
   // Clear history when switching projects
