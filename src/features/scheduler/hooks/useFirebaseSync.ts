@@ -4,7 +4,10 @@ import {
   collection,
   setDoc,
   getDoc,
+  getDocs,
   onSnapshot,
+  query,
+  where,
   updateDoc,
   serverTimestamp,
   Timestamp,
@@ -371,6 +374,96 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     stopSync,
     disconnectProject,
   };
+}
+
+/**
+ * Discovery hook — on login, fetch every cloud project the user has
+ * access to (they either own it, or their uid is in `collaborators`).
+ *
+ * This is the piece that fixes "new device shows no projects": until
+ * now, cloud projects were only reachable if you knew the shareId.
+ *
+ * Returns a status object. `discovered` is null before the first fetch
+ * completes; after that it's the merged, deduped list.
+ *
+ * The Firestore rules in `firestore.rules` scope `list` queries to
+ * documents matching one of the two filters, so this only ever returns
+ * projects the caller is actually tied to.
+ */
+export interface DiscoveryState {
+  discovered: Project[] | null;
+  loading: boolean;
+  error: SyncError | null;
+}
+
+export function useDiscoveredCloudProjects(userId: string | null): DiscoveryState {
+  const [discovered, setDiscovered] = useState<Project[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<SyncError | null>(null);
+
+  useEffect(() => {
+    if (!userId || !isFirebaseConfigured()) {
+      // Solo-dev mode or signed out — nothing to discover.
+      setDiscovered(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const instances = getFirebaseInstances();
+    if (!instances) {
+      setDiscovered(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    const projectsRef = collection(instances.db, 'projects');
+    const ownedQuery = query(projectsRef, where('ownerId', '==', userId));
+    const collabQuery = query(projectsRef, where('collaborators', 'array-contains', userId));
+
+    Promise.all([getDocs(ownedQuery), getDocs(collabQuery)])
+      .then(([ownedSnap, collabSnap]) => {
+        if (cancelled) return;
+        // Dedupe by document id (shareId). If the same project matches
+        // both queries it only appears once.
+        const seen = new Set<string>();
+        const results: Project[] = [];
+        const addFromSnap = (snap: typeof ownedSnap) => {
+          snap.forEach(docSnap => {
+            if (seen.has(docSnap.id)) return;
+            seen.add(docSnap.id);
+            const project = firestoreToProject(docSnap.data() as Record<string, unknown>);
+            // Defensive: ensure shareId is set (doc id IS the shareId
+            // by construction — see uploadProject).
+            if (!project.shareId) project.shareId = docSnap.id;
+            results.push(project);
+          });
+        };
+        addFromSnap(ownedSnap);
+        addFromSnap(collabSnap);
+        console.log('[discovery] found', results.length, 'cloud project(s) for', userId);
+        setDiscovered(results);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[discovery] Failed to list cloud projects:', err);
+        setError(extractSyncError(err, 'listen'));
+        setDiscovered([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  return { discovered, loading, error };
 }
 
 // Hook to sync project changes to Firestore.

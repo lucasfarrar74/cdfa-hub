@@ -112,6 +112,16 @@ After a change to the collaboration code, run this five-minute check:
 
 If step 2 or 3 fails, check the sync indicator tooltip — it now surfaces the Firebase error code (e.g. `permission-denied` means rules weren't deployed).
 
+### Cross-device project discovery
+
+On login, the app queries Firestore for every project where the signed-in user is `ownerId` OR listed in `collaborators`, and merges them into the local project list. This is what makes cloud projects appear on a fresh browser without pasting a shareId.
+
+Two things must be true for this to work:
+- `firestore.rules` must be deployed (they define the `list` permission — the current rules restrict list queries to `ownerId == uid` or `uid in collaborators`; without that update, all list queries return `permission-denied`)
+- The user must be signed in with the account that either owns the project or was added to `collaborators`
+
+Discovery **adds** projects; it never overwrites a local one. If you delete a cloud project locally without disconnecting it from cloud first, discovery will re-add it on next login. Use the "disconnect from cloud" flow in the share dialog before deleting if you want the project to stay gone on this device.
+
 ### Version banner
 
 Every page mounts `<NewVersionBanner>` (see `src/components/NewVersionBanner.tsx`), which polls `/version.json` every 60 seconds and prompts a refresh when the deployed build is newer than what the browser is running. This is the defense against "teammate on a stale tab" problems during live events — don't remove it.

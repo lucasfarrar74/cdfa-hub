@@ -1,8 +1,10 @@
 import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { useFirebaseSync, useSyncProjectChanges } from '../hooks/useFirebaseSync';
+import { useFirebaseSync, useSyncProjectChanges, useDiscoveredCloudProjects } from '../hooks/useFirebaseSync';
 import { useHistoryTracker } from '../hooks/useHistory';
+import { useAuth } from '../../../context/AuthContext';
+import { mergeDiscoveredProjects } from '../utils/mergeDiscoveredProjects';
 import type {
   ScheduleState,
   ScheduleContextType,
@@ -224,6 +226,15 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     migrateAppState
   );
 
+  // Cross-device project discovery: when a real Firebase user is
+  // signed in (i.e. auth is enabled, not solo-dev mode), fetch every
+  // cloud project they own or collaborate on. On first arrival, merge
+  // any that aren't already local — this is what makes cloud projects
+  // show up on a fresh browser after login.
+  const auth = useAuth();
+  const discoveryUserId = auth.isConfigured ? auth.user?.uid ?? null : null;
+  const { discovered: discoveredCloudProjects } = useDiscoveredCloudProjects(discoveryUserId);
+
   // History tracking for undo/redo
   const historyTracker = useHistoryTracker<MeetingsSnapshot>(20);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -237,17 +248,51 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const clearMutationError = useCallback(() => setMutationError(null), []);
 
-  // Create default project if none exist
+  // Create a starter project only if there's nothing to hydrate from
+  // discovery. If auth is on and discovery is still in flight, wait —
+  // otherwise a "New Event" briefly races the discovered cloud projects
+  // and can end up as the active project on every login.
   useEffect(() => {
-    if (appState.projects.length === 0) {
+    if (appState.projects.length > 0) return;
+    // Discovery pending — hold off; it may bring cloud projects that
+    // make a default unnecessary. When discovery is disabled
+    // (`discoveryUserId === null`, i.e. solo-dev mode), skip the wait.
+    if (discoveryUserId !== null && discoveredCloudProjects === null) return;
+    setAppState(prev => {
+      // Race guard: another effect (e.g. hydration) added projects
+      // between fire and commit.
+      if (prev.projects.length > 0) return prev;
       const defaultProject = createEmptyProject('New Event');
-      setAppState({
+      return {
         projects: [defaultProject],
         activeProjectId: defaultProject.id,
         isGenerating: false,
-      });
-    }
-  }, [appState.projects.length, setAppState]);
+      };
+    });
+  }, [appState.projects.length, discoveryUserId, discoveredCloudProjects, setAppState]);
+
+  // Hydrate discovered cloud projects into the local list. Additions
+  // only — mergeDiscoveredProjects never overwrites a local project
+  // that shares the same shareId, so the live Firestore subscription
+  // remains the source of truth for anything already being synced.
+  useEffect(() => {
+    if (!discoveredCloudProjects) return;
+    setAppState(prev => {
+      const { merged, additions } = mergeDiscoveredProjects(prev.projects, discoveredCloudProjects);
+      if (additions.length === 0) return prev;
+      console.log(
+        `[schedule-context] hydrated ${additions.length} cloud project(s) discovered for user ${discoveryUserId}`,
+      );
+      // If we still have no active project (fresh device, first login),
+      // pick the first hydrated cloud project so the user lands on real
+      // work rather than the empty "New Event" default.
+      const nextActiveId =
+        prev.activeProjectId && merged.some(p => p.id === prev.activeProjectId)
+          ? prev.activeProjectId
+          : additions[0].id;
+      return { ...prev, projects: merged, activeProjectId: nextActiveId };
+    });
+  }, [discoveredCloudProjects, discoveryUserId, setAppState]);
 
   // Get active project
   const activeProject = useMemo(() => {
