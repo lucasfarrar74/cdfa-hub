@@ -24,11 +24,33 @@ export default function SyncStatusIndicator() {
     activeCollaborators,
     isFirebaseEnabled,
     lastSyncError,
+    discoveryError,
     remoteIntegrityWarning,
   } = useSchedule();
 
-  // Don't show anything if not a cloud project
+  // Show a discovery-error chip even when the active project isn't in
+  // the cloud — otherwise a missed `firestore.rules` deploy silently
+  // hides every cloud project without any visible signal.
   if (!activeProject?.isCloud || !isFirebaseEnabled) {
+    if (isFirebaseEnabled && discoveryError) {
+      return (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+          title={
+            discoveryError.code === 'permission-denied'
+              ? "Can't list your cloud projects — firestore.rules needs to be deployed. Run: npx firebase-tools deploy --only firestore:rules"
+              : `Cloud discovery failed: ${discoveryError.message}`
+          }
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="text-xs font-medium">
+            {discoveryError.code === 'permission-denied' ? 'Cloud blocked by rules' : 'Cloud unreachable'}
+          </span>
+        </div>
+      );
+    }
     return null;
   }
 

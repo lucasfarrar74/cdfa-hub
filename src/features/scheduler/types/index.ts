@@ -367,6 +367,12 @@ export interface ScheduleContextType extends ScheduleState {
   // Most recent cloud-sync error (null when healthy or offline).
   lastSyncError: SyncError | null;
 
+  // Error from the on-login "which cloud projects do I have?" query.
+  // Non-null usually means Firestore rules haven't been deployed with
+  // the new list permissions (`permission-denied`) — surfacing this is
+  // what stops the feature from failing silently on a fresh device.
+  discoveryError: SyncError | null;
+
   // Warning surfaced when an incoming Firestore snapshot contained a
   // double-booking — evidence that a concurrent edit race got past the
   // per-client guards. Null when the last snapshot was clean.

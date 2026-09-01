@@ -233,7 +233,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // show up on a fresh browser after login.
   const auth = useAuth();
   const discoveryUserId = auth.isConfigured ? auth.user?.uid ?? null : null;
-  const { discovered: discoveredCloudProjects } = useDiscoveredCloudProjects(discoveryUserId);
+  const { discovered: discoveredCloudProjects, error: discoveryError } =
+    useDiscoveredCloudProjects(discoveryUserId);
 
   // History tracking for undo/redo
   const historyTracker = useHistoryTracker<MeetingsSnapshot>(20);
@@ -1364,6 +1365,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     syncStatus,
     activeCollaborators,
     lastSyncError,
+    discoveryError,
     remoteIntegrityWarning,
     uploadProjectToCloud,
     openCloudProject,
@@ -1430,6 +1432,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     syncStatus,
     activeCollaborators,
     lastSyncError,
+    discoveryError,
     remoteIntegrityWarning,
     uploadProjectToCloud,
     openCloudProject,
