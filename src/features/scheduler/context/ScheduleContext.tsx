@@ -22,6 +22,9 @@ import type {
   ConflictInfo,
   ScheduleConflictsSummary,
   ScheduleScoreInfo,
+  ActivityEvent,
+  ActivityEventType,
+  UndoPayload,
 } from '../types';
 import { isLegacySupplier, migrateSupplier, isLegacyEventConfig, migrateEventConfig } from '../types';
 import { autoFillCancelledSlots, bumpMeetingToLaterSlot, findNextAvailableSlotAfter } from '../utils/scheduler';
@@ -360,6 +363,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     syncProject,
     syncProjectChanges,
     setFocusedMeeting,
+    activityEvents,
+    logActivity,
+    markActivityUndone,
     stopSync,
     disconnectProject: disconnectFromCloudInternal,
   } = useFirebaseSync({
@@ -781,20 +787,142 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     };
   }, [activeProject, setAppState, updateActiveProject]);
 
+  // Helper: build a short human summary for an activity event. Kept
+  // simple — the History panel will show it verbatim.
+  const buildMeetingLabel = useCallback((meetingId: string): string => {
+    if (!activeProject) return `meeting ${meetingId.slice(0, 6)}`;
+    const m = activeProject.meetings.find(x => x.id === meetingId);
+    if (!m) return `meeting ${meetingId.slice(0, 6)}`;
+    const supplier = activeProject.suppliers.find(s => s.id === m.supplierId);
+    const buyer = activeProject.buyers.find(b => b.id === m.buyerId);
+    return `${supplier?.companyName ?? 'unknown supplier'} × ${buyer?.name ?? 'unknown buyer'}`;
+  }, [activeProject]);
+
+  // Helper: dispatch an activity event with consistent user attribution.
+  // Fire-and-forget; falls back to a no-op when there's no cloud project
+  // to log against (solo-dev mode).
+  const emitActivity = useCallback(
+    (type: ActivityEventType, summary: string, undoPayload: UndoPayload, details: ActivityEvent['details'] = {}) => {
+      if (!activeProject?.isCloud) return;
+      const uid = auth.user?.uid || 'local-user';
+      const userName = auth.user?.displayName || auth.user?.email || undefined;
+      void logActivity({
+        type,
+        userId: uid,
+        userName,
+        summary,
+        details,
+        undoPayload,
+      });
+    },
+    [activeProject, auth.user, logActivity],
+  );
+
+  // Apply the inverse of an activity event ("undo this change"). Reads
+  // the event's undoPayload and runs the write-time guards on the
+  // result — if the inverse would create a double-booking (e.g. a
+  // later change now occupies the slot we'd restore into), we set
+  // mutationError and skip. Otherwise we apply, mark the source event
+  // undone, and log a new "Undid: X" event for the audit trail.
+  const applyActivityUndo = useCallback(async (event: ActivityEvent): Promise<'ok' | 'skipped'> => {
+    if (event.undone) return 'skipped';
+    const p = event.undoPayload;
+    if (p.kind === 'none') return 'skipped';
+    if (!activeProject) return 'skipped';
+
+    switch (p.kind) {
+      case 'move': {
+        const nextMeetings = activeProject.meetings.map(m =>
+          m.id === p.meetingId ? { ...m, timeSlotId: p.previousSlotId } : m,
+        );
+        const violation = detectFirstDoubleBooking(nextMeetings);
+        if (violation) {
+          setMutationError(
+            `Undo blocked: reverting this move would create a double-booking. Undo a later change first.`,
+          );
+          return 'skipped';
+        }
+        saveToHistory();
+        updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
+        break;
+      }
+      case 'swap': {
+        const nextMeetings = activeProject.meetings.map(m => {
+          if (m.id === p.meetingId1) return { ...m, timeSlotId: p.previousSlot1 };
+          if (m.id === p.meetingId2) return { ...m, timeSlotId: p.previousSlot2 };
+          return m;
+        });
+        const violation = detectFirstDoubleBooking(nextMeetings);
+        if (violation) {
+          setMutationError(`Undo blocked: reverting this swap would create a double-booking.`);
+          return 'skipped';
+        }
+        saveToHistory();
+        updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
+        break;
+      }
+      case 'add': {
+        saveToHistory();
+        updateActiveProject(project => ({
+          ...project,
+          meetings: project.meetings.filter(m => m.id !== p.meetingId),
+        }));
+        break;
+      }
+      case 'cancel':
+      case 'status-change': {
+        saveToHistory();
+        updateActiveProject(project => ({
+          ...project,
+          meetings: project.meetings.map(m =>
+            m.id === p.meetingId ? { ...m, status: p.previousStatus } : m,
+          ),
+        }));
+        break;
+      }
+      case 'bulk-meetings': {
+        saveToHistory();
+        updateActiveProject(project => ({ ...project, meetings: p.previousMeetings }));
+        break;
+      }
+    }
+
+    await markActivityUndone(event.id);
+    emitActivity(
+      'undo_applied',
+      `Undid: ${event.summary}`,
+      { kind: 'none' },
+      { meetingId: event.details.meetingId },
+    );
+    return 'ok';
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity, markActivityUndone]);
+
   // Meeting operations
   const updateMeetingStatus = useCallback((meetingId: string, status: MeetingStatus) => {
+    if (!activeProject) return;
+    const prev = activeProject.meetings.find(m => m.id === meetingId);
+    if (!prev) return;
+    const previousStatus = prev.status;
     saveToHistory();
     updateActiveProject(project => ({
       ...project,
       meetings: project.meetings.map(m => (m.id === meetingId ? { ...m, status } : m)),
     }));
-  }, [saveToHistory, updateActiveProject]);
+    emitActivity(
+      'meeting_status_changed',
+      `Set ${buildMeetingLabel(meetingId)} to ${status}`,
+      { kind: 'status-change', meetingId, previousStatus },
+      { meetingId },
+    );
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity, buildMeetingLabel]);
 
   const swapMeetings = useCallback((meetingId1: string, meetingId2: string) => {
     if (!activeProject) return;
     const meeting1 = activeProject.meetings.find(m => m.id === meetingId1);
     const meeting2 = activeProject.meetings.find(m => m.id === meetingId2);
     if (!meeting1 || !meeting2) return;
+    const previousSlot1 = meeting1.timeSlotId;
+    const previousSlot2 = meeting2.timeSlotId;
 
     const nextMeetings = activeProject.meetings.map(m => {
       if (m.id === meetingId1) return { ...m, timeSlotId: meeting2.timeSlotId };
@@ -812,10 +940,19 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     saveToHistory();
     updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
-  }, [activeProject, saveToHistory, updateActiveProject]);
+    emitActivity(
+      'meeting_swapped',
+      `Swapped ${buildMeetingLabel(meetingId1)} ↔ ${buildMeetingLabel(meetingId2)}`,
+      { kind: 'swap', meetingId1, meetingId2, previousSlot1, previousSlot2 },
+      { meetingId: meetingId1 },
+    );
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity, buildMeetingLabel]);
 
   const moveMeeting = useCallback((meetingId: string, newTimeSlotId: string) => {
     if (!activeProject) return;
+    const prev = activeProject.meetings.find(m => m.id === meetingId);
+    if (!prev) return;
+    const previousSlotId = prev.timeSlotId;
     const nextMeetings = activeProject.meetings.map(m =>
       m.id === meetingId ? { ...m, timeSlotId: newTimeSlotId } : m,
     );
@@ -830,9 +967,19 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
 
     saveToHistory();
     updateActiveProject(project => ({ ...project, meetings: nextMeetings }));
-  }, [activeProject, saveToHistory, updateActiveProject]);
+    emitActivity(
+      'meeting_moved',
+      `Moved ${buildMeetingLabel(meetingId)}`,
+      { kind: 'move', meetingId, previousSlotId },
+      { meetingId, fromSlot: previousSlotId, toSlot: newTimeSlotId },
+    );
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity, buildMeetingLabel]);
 
   const cancelMeeting = useCallback((meetingId: string) => {
+    if (!activeProject) return;
+    const prev = activeProject.meetings.find(m => m.id === meetingId);
+    if (!prev) return;
+    const previousStatus = prev.status;
     saveToHistory();
     updateActiveProject(project => ({
       ...project,
@@ -840,7 +987,13 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
         m.id === meetingId ? { ...m, status: 'cancelled' as const } : m
       ),
     }));
-  }, [saveToHistory, updateActiveProject]);
+    emitActivity(
+      'meeting_cancelled',
+      `Cancelled ${buildMeetingLabel(meetingId)}`,
+      { kind: 'cancel', meetingId, previousStatus },
+      { meetingId },
+    );
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity, buildMeetingLabel]);
 
   const autoFillGaps = useCallback(() => {
     saveToHistory();
@@ -1023,8 +1176,20 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       ],
     }));
 
+    // Log after the state update — buildMeetingLabel needs the meeting
+    // to be present in activeProject to resolve names, but that only
+    // updates on the next render. Fall back to explicit name lookup.
+    const supplier = activeProject.suppliers.find(s => s.id === supplierId);
+    const buyer = activeProject.buyers.find(b => b.id === buyerId);
+    emitActivity(
+      'meeting_added',
+      `Added ${supplier?.companyName ?? 'supplier'} × ${buyer?.name ?? 'buyer'}`,
+      { kind: 'add', meetingId: newMeetingId },
+      { meetingId: newMeetingId, supplierName: supplier?.companyName, buyerName: buyer?.name },
+    );
+
     return { success: true, meetingId: newMeetingId, message: 'Meeting added successfully' };
-  }, [activeProject, saveToHistory, updateActiveProject]);
+  }, [activeProject, saveToHistory, updateActiveProject, emitActivity]);
 
   // Conflict detection functions
   const getScheduleConflictsAction = useCallback((): ScheduleConflictsSummary => {
@@ -1380,6 +1545,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     openCloudProject,
     disconnectFromCloud,
     setFocusedMeeting,
+    activityEvents,
+    applyActivityUndo,
 
     // Undo/Redo
     undo,
@@ -1448,6 +1615,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     openCloudProject,
     disconnectFromCloud,
     setFocusedMeeting,
+    activityEvents,
+    applyActivityUndo,
     undo,
     redo,
     historyState,

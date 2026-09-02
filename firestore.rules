@@ -44,6 +44,16 @@ service cloud.firestore {
         allow read: if request.auth != null;
         allow write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Activity log — one doc per user action (moved a meeting,
+      // added a meeting, etc.). Any authenticated user with access to
+      // the parent project can read and append; updates are used to
+      // mark an event undone. Delete is not allowed — the log is a
+      // permanent audit trail, capped by client-side pagination.
+      match /activity/{eventId} {
+        allow read, create, update: if request.auth != null;
+        allow delete: if false;
+      }
     }
   }
 }

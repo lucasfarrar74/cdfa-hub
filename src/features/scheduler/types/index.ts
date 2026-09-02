@@ -203,20 +203,44 @@ export interface ActiveCollaborator {
 
 // Activity event for collaboration feed
 export type ActivityEventType =
+  | 'meeting_moved'
+  | 'meeting_swapped'
+  | 'meeting_added'
+  | 'meeting_cancelled'
   | 'meeting_started'
   | 'meeting_completed'
   | 'meeting_delayed'
   | 'meeting_bumped'
-  | 'meeting_cancelled'
+  | 'meeting_status_changed'
   | 'schedule_generated'
-  | 'schedule_cleared';
+  | 'schedule_cleared'
+  | 'auto_fix_applied'
+  | 'undo_applied';
+
+/**
+ * Enough state to reverse a change. Every activity event that admins
+ * can undo carries one of these. Bulk events (auto-fix, schedule-
+ * generated) carry a full-array snapshot; single-meeting events carry
+ * only the tiny delta needed to invert the change.
+ */
+export type UndoPayload =
+  | { kind: 'move'; meetingId: string; previousSlotId: string }
+  | { kind: 'swap'; meetingId1: string; meetingId2: string; previousSlot1: string; previousSlot2: string }
+  | { kind: 'add'; meetingId: string }
+  | { kind: 'cancel'; meetingId: string; previousStatus: MeetingStatus }
+  | { kind: 'status-change'; meetingId: string; previousStatus: MeetingStatus }
+  | { kind: 'bulk-meetings'; previousMeetings: Meeting[] }
+  | { kind: 'none' }; // event is informational, not undoable
 
 export interface ActivityEvent {
   id: string;
   type: ActivityEventType;
-  timestamp: string;
-  userId?: string;
+  timestamp: string; // ISO string
+  userId: string;
   userName?: string;
+  /** Short human summary — precomputed at write time so consumers don't need lookups. */
+  summary: string;
+  /** Reference IDs for optional deep-linking (highlight the affected meeting). */
   details: {
     meetingId?: string;
     supplierName?: string;
@@ -225,6 +249,10 @@ export interface ActivityEvent {
     fromSlot?: string;
     toSlot?: string;
   };
+  /** How to reverse this event. `kind: 'none'` = informational only. */
+  undoPayload: UndoPayload;
+  /** True after someone has clicked Undo on this event, to grey it out and prevent double-undo. */
+  undone?: boolean;
 }
 
 // Meeting note for collaboration
@@ -374,6 +402,20 @@ export interface ScheduleContextType extends ScheduleState {
    * the active project isn't a cloud project.
    */
   setFocusedMeeting: (meetingId: string | null) => void;
+
+  /**
+   * Live-tailed shared activity log for the active cloud project.
+   * Newest first, capped at ~50 events. Empty when the active project
+   * isn't a cloud project.
+   */
+  activityEvents: ActivityEvent[];
+  /**
+   * Apply the inverse of an activity event ("undo this change"). The
+   * inverse is dispatched through the standard write-time guards, so it
+   * can be refused with a red toast if it would create a stack (e.g. a
+   * later change now occupies the slot we'd restore into).
+   */
+  applyActivityUndo: (event: ActivityEvent) => Promise<'ok' | 'skipped'>;
 
   // Undo/Redo
   undo: () => void;

@@ -11,6 +11,7 @@ import {
   ScheduleErrorToast,
   ScheduleIntegrityBanner,
   SyncStatusIndicator,
+  HistoryPanel,
   KeyboardShortcutsHelp,
   NotificationSettings,
   ThemeToggle,
@@ -119,6 +120,7 @@ function SchedulerContent() {
                 <ThemeToggle />
                 <KeyboardShortcutsHelp />
                 <NotificationSettings />
+                <HistoryPanel />
                 <SyncStatusIndicator />
                 {activeProject && (
                   <div className="text-right">

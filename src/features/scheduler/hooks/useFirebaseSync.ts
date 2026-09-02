@@ -3,11 +3,14 @@ import {
   doc,
   collection,
   setDoc,
+  addDoc,
   getDoc,
   getDocs,
   onSnapshot,
   query,
   where,
+  orderBy,
+  limit as fsLimit,
   updateDoc,
   runTransaction,
   arrayUnion,
@@ -21,7 +24,7 @@ import {
   signInAnonymouslyIfNeeded,
   getEffectiveUserId,
 } from '../lib/firebase';
-import type { Project, SyncStatus, ActiveCollaborator, SyncError } from '../types';
+import type { Project, SyncStatus, ActiveCollaborator, SyncError, ActivityEvent } from '../types';
 import { findAllDoubleBookings } from '../utils/conflictDetection';
 import { computeSyncOutcome, getProjectRevision } from '../utils/syncOutcome';
 
@@ -119,6 +122,12 @@ interface UseFirebaseSyncReturn {
    * per-user 500ms throttle. Pass `null` to clear focus.
    */
   setFocusedMeeting: (meetingId: string | null) => void;
+  /** Live-tailed activity log for the active project (newest first, cap 50). */
+  activityEvents: ActivityEvent[];
+  /** Append an event to the shared activity log. Fire-and-forget. */
+  logActivity: (event: Omit<ActivityEvent, 'id' | 'timestamp'>) => Promise<void>;
+  /** Mark an event as undone so the History UI can grey it out. */
+  markActivityUndone: (eventId: string) => Promise<void>;
   stopSync: () => void;
   disconnectProject: (projectId: string) => void;
 }
@@ -137,6 +146,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
 
   const unsubscribeRef = useRef<Unsubscribe | null>(null);
   const presenceUnsubscribeRef = useRef<Unsubscribe | null>(null);
+  const activityUnsubscribeRef = useRef<Unsubscribe | null>(null);
   const currentProjectIdRef = useRef<string | null>(null);
   const lastLocalUpdateRef = useRef<string | null>(null);
   // Latest revision we've observed on the server for the active cloud
@@ -144,6 +154,8 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   // still up-to-date; updated on: uploadProject, openProject, every
   // onSnapshot, and after a successful sync transaction commits.
   const lastKnownRevisionRef = useRef<number>(0);
+  // Live-tailed activity log (last 50 events, newest first).
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
 
   // Note: Auth is now handled by AuthContext which will call setOverrideUserId
 
@@ -334,6 +346,25 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       }
     );
 
+    // Subscribe to the activity log — the last 50 events by timestamp
+    // desc. Feeds the History panel and any live-change notifications.
+    const activityRef = collection(instances.db, 'projects', project.shareId, 'activity');
+    const activityQuery = query(activityRef, orderBy('timestamp', 'desc'), fsLimit(50));
+    activityUnsubscribeRef.current = onSnapshot(
+      activityQuery,
+      (snap) => {
+        const events: ActivityEvent[] = [];
+        snap.forEach((doc) => {
+          const data = doc.data() as Omit<ActivityEvent, 'id'>;
+          events.push({ ...data, id: doc.id });
+        });
+        setActivityEvents(events);
+      },
+      (err) => {
+        console.warn('[activity] subscription error:', err);
+      },
+    );
+
     // Subscribe to presence (active collaborators)
     const presenceRef = collection(instances.db, 'projects', project.shareId, 'presence');
     presenceUnsubscribeRef.current = onSnapshot(
@@ -452,6 +483,11 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       presenceUnsubscribeRef.current();
       presenceUnsubscribeRef.current = null;
     }
+    if (activityUnsubscribeRef.current) {
+      activityUnsubscribeRef.current();
+      activityUnsubscribeRef.current = null;
+    }
+    setActivityEvents([]);
     if (focusFlushTimerRef.current) {
       clearTimeout(focusFlushTimerRef.current);
       focusFlushTimerRef.current = null;
@@ -469,6 +505,46 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     // Note: We don't delete from Firestore, just stop syncing
     // The project remains in the cloud for other collaborators
   }, [stopSync]);
+
+  /**
+   * Append an activity event to the current project's log. Fire-and-
+   * forget — errors are logged, not thrown, because a lost log entry
+   * should never block the underlying mutation from committing.
+   *
+   * Skipped when there's no active cloud project (solo-dev mode is a
+   * no-op; local-only projects don't have a shared log to write to).
+   */
+  const logActivity = useCallback(async (event: Omit<ActivityEvent, 'id' | 'timestamp'>): Promise<void> => {
+    const instances = getFirebaseInstances();
+    const shareId = activeSyncedShareIdRef.current;
+    if (!instances || !shareId) return;
+    try {
+      const activityCol = collection(instances.db, 'projects', shareId, 'activity');
+      await addDoc(activityCol, {
+        ...event,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[activity] write failed:', err);
+    }
+  }, []);
+
+  /**
+   * Mark an existing activity event as undone. Used after successfully
+   * applying its inverse, so the History panel greys it out and the
+   * button becomes disabled to prevent double-undo.
+   */
+  const markActivityUndone = useCallback(async (eventId: string): Promise<void> => {
+    const instances = getFirebaseInstances();
+    const shareId = activeSyncedShareIdRef.current;
+    if (!instances || !shareId) return;
+    try {
+      const eventRef = doc(instances.db, 'projects', shareId, 'activity', eventId);
+      await updateDoc(eventRef, { undone: true });
+    } catch (err) {
+      console.warn('[activity] mark-undone failed:', err);
+    }
+  }, []);
 
   /**
    * Push a project's changes to Firestore inside an atomic transaction.
@@ -561,6 +637,9 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     syncProject,
     syncProjectChanges,
     setFocusedMeeting,
+    activityEvents,
+    logActivity,
+    markActivityUndone,
     stopSync,
     disconnectProject,
   };

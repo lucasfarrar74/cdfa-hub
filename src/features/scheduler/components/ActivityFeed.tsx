@@ -95,8 +95,14 @@ const activityConfig: Record<ActivityEventType, { icon: string; color: string; v
   meeting_delayed: { icon: '⏳', color: 'text-yellow-600', verb: 'was delayed' },
   meeting_bumped: { icon: '➡️', color: 'text-purple-600', verb: 'was bumped' },
   meeting_cancelled: { icon: '✕', color: 'text-red-600', verb: 'was cancelled' },
+  meeting_moved: { icon: '↔', color: 'text-blue-600', verb: 'was moved' },
+  meeting_swapped: { icon: '⇄', color: 'text-blue-600', verb: 'was swapped' },
+  meeting_added: { icon: '+', color: 'text-green-600', verb: 'was added' },
+  meeting_status_changed: { icon: '⚙', color: 'text-gray-600', verb: 'status changed' },
   schedule_generated: { icon: '📅', color: 'text-blue-600', verb: 'Schedule was generated' },
   schedule_cleared: { icon: '🗑️', color: 'text-gray-600', verb: 'Schedule was cleared' },
+  auto_fix_applied: { icon: '🔧', color: 'text-amber-600', verb: 'auto-fix ran' },
+  undo_applied: { icon: '↶', color: 'text-gray-600', verb: 'undone' },
 };
 
 interface ActivityFeedProps {
