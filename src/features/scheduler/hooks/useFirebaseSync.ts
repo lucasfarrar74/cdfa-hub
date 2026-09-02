@@ -12,6 +12,7 @@ import {
   orderBy,
   limit as fsLimit,
   updateDoc,
+  deleteDoc,
   runTransaction,
   arrayUnion,
   serverTimestamp,
@@ -24,7 +25,7 @@ import {
   signInAnonymouslyIfNeeded,
   getEffectiveUserId,
 } from '../lib/firebase';
-import type { Project, SyncStatus, ActiveCollaborator, SyncError, ActivityEvent } from '../types';
+import type { Project, SyncStatus, ActiveCollaborator, SyncError, ActivityEvent, ProjectVersion } from '../types';
 import { findAllDoubleBookings } from '../utils/conflictDetection';
 import { computeSyncOutcome, getProjectRevision } from '../utils/syncOutcome';
 
@@ -128,6 +129,16 @@ interface UseFirebaseSyncReturn {
   logActivity: (event: Omit<ActivityEvent, 'id' | 'timestamp'>) => Promise<void>;
   /** Mark an event as undone so the History UI can grey it out. */
   markActivityUndone: (eventId: string) => Promise<void>;
+  /** Live-tailed named-version snapshots for the active project (newest first). */
+  projectVersions: ProjectVersion[];
+  /** Save the current project state as a named snapshot. */
+  saveProjectVersion: (
+    project: Project,
+    name: string,
+    user: { userId: string; userName?: string },
+  ) => Promise<{ ok: boolean; versionId?: string; message?: string }>;
+  /** Delete a saved version snapshot. */
+  deleteProjectVersion: (versionId: string) => Promise<boolean>;
   stopSync: () => void;
   disconnectProject: (projectId: string) => void;
 }
@@ -156,6 +167,9 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   const lastKnownRevisionRef = useRef<number>(0);
   // Live-tailed activity log (last 50 events, newest first).
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  // Live-tailed list of named snapshots for the active project.
+  const [projectVersions, setProjectVersions] = useState<ProjectVersion[]>([]);
+  const versionsUnsubscribeRef = useRef<Unsubscribe | null>(null);
 
   // Note: Auth is now handled by AuthContext which will call setOverrideUserId
 
@@ -365,6 +379,25 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       },
     );
 
+    // Subscribe to named version snapshots (newest first, no limit —
+    // client-side cap of 20 is enforced on writes).
+    const versionsRef = collection(instances.db, 'projects', project.shareId, 'versions');
+    const versionsQuery = query(versionsRef, orderBy('createdAt', 'desc'));
+    versionsUnsubscribeRef.current = onSnapshot(
+      versionsQuery,
+      (snap) => {
+        const versions: ProjectVersion[] = [];
+        snap.forEach((doc) => {
+          const data = doc.data() as Omit<ProjectVersion, 'id'>;
+          versions.push({ ...data, id: doc.id });
+        });
+        setProjectVersions(versions);
+      },
+      (err) => {
+        console.warn('[versions] subscription error:', err);
+      },
+    );
+
     // Subscribe to presence (active collaborators)
     const presenceRef = collection(instances.db, 'projects', project.shareId, 'presence');
     presenceUnsubscribeRef.current = onSnapshot(
@@ -487,7 +520,12 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       activityUnsubscribeRef.current();
       activityUnsubscribeRef.current = null;
     }
+    if (versionsUnsubscribeRef.current) {
+      versionsUnsubscribeRef.current();
+      versionsUnsubscribeRef.current = null;
+    }
     setActivityEvents([]);
+    setProjectVersions([]);
     if (focusFlushTimerRef.current) {
       clearTimeout(focusFlushTimerRef.current);
       focusFlushTimerRef.current = null;
@@ -543,6 +581,86 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       await updateDoc(eventRef, { undone: true });
     } catch (err) {
       console.warn('[activity] mark-undone failed:', err);
+    }
+  }, []);
+
+  /**
+   * Save the current project state as a named version snapshot.
+   * Enforces a client-side cap of 20 snapshots by deleting the oldest
+   * when writing beyond that (soft cap — the Firestore rules permit
+   * more, this is UX-driven).
+   *
+   * `createdBy` is captured from the passed-in `user` argument so this
+   * hook doesn't need a direct dependency on AuthContext.
+   */
+  const saveProjectVersion = useCallback(
+    async (
+      projectData: Project,
+      name: string,
+      user: { userId: string; userName?: string },
+    ): Promise<{ ok: boolean; versionId?: string; message?: string }> => {
+      if (!projectData.isCloud || !projectData.shareId) {
+        return { ok: false, message: 'Only cloud projects can be versioned.' };
+      }
+      const instances = getFirebaseInstances();
+      if (!instances) return { ok: false, message: 'Firebase not configured.' };
+      const shareId = projectData.shareId;
+
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        return { ok: false, message: 'Please give the version a name.' };
+      }
+
+      try {
+        // Enforce cap: if we already have >= 20 snapshots, remove the
+        // oldest until we're back under. Client-side only — a race with
+        // another admin saving at the same time may leave a couple extra,
+        // which is fine.
+        const versionsRef = collection(instances.db, 'projects', shareId, 'versions');
+        const existing = await getDocs(query(versionsRef, orderBy('createdAt', 'desc')));
+        if (existing.size >= 20) {
+          const doomed = existing.docs.slice(19); // keep the 19 newest
+          await Promise.all(
+            doomed.map(d =>
+              deleteDoc(doc(instances.db, 'projects', shareId, 'versions', d.id))
+                .catch(err => console.warn('[versions] trim failed:', err)),
+            ),
+          );
+        }
+
+        const versionData: Omit<ProjectVersion, 'id'> = {
+          name: trimmedName,
+          createdAt: new Date().toISOString(),
+          createdBy: {
+            userId: user.userId,
+            userName: user.userName,
+          },
+          project: projectData,
+        };
+        const written = await addDoc(versionsRef, versionData);
+        return { ok: true, versionId: written.id };
+      } catch (error) {
+        console.error('[versions] save failed:', error);
+        return { ok: false, message: (error as Error)?.message || 'Save failed.' };
+      }
+    },
+    [],
+  );
+
+  /**
+   * Delete a saved version snapshot. Idempotent — doesn't error if the
+   * version was already deleted by another admin.
+   */
+  const deleteProjectVersion = useCallback(async (versionId: string): Promise<boolean> => {
+    const instances = getFirebaseInstances();
+    const shareId = activeSyncedShareIdRef.current;
+    if (!instances || !shareId) return false;
+    try {
+      await deleteDoc(doc(instances.db, 'projects', shareId, 'versions', versionId));
+      return true;
+    } catch (err) {
+      console.warn('[versions] delete failed:', err);
+      return false;
     }
   }, []);
 
@@ -640,6 +758,9 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     activityEvents,
     logActivity,
     markActivityUndone,
+    projectVersions,
+    saveProjectVersion,
+    deleteProjectVersion,
     stopSync,
     disconnectProject,
   };

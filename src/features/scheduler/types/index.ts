@@ -255,6 +255,25 @@ export interface ActivityEvent {
   undone?: boolean;
 }
 
+/**
+ * A named, restoreable snapshot of a cloud project's full state at a
+ * moment in time. Written manually by an admin ("Locked pre-event")
+ * and stored in the projects/{shareId}/versions subcollection.
+ * Restoring one overwrites the current project state — usually paired
+ * with a confirmation dialog and a "save current as X first" option.
+ */
+export interface ProjectVersion {
+  id: string;
+  name: string;
+  createdAt: string; // ISO
+  createdBy: {
+    userId: string;
+    userName?: string;
+  };
+  /** Serialized Project blob — same shape written to the cloud doc. */
+  project: Project;
+}
+
 // Meeting note for collaboration
 export interface MeetingNote {
   id: string;
@@ -416,6 +435,19 @@ export interface ScheduleContextType extends ScheduleState {
    * later change now occupies the slot we'd restore into).
    */
   applyActivityUndo: (event: ActivityEvent) => Promise<'ok' | 'skipped'>;
+
+  /**
+   * Named version snapshots of the active cloud project (newest first).
+   * Populated live via a Firestore subscription; empty when there's no
+   * cloud project active.
+   */
+  projectVersions: ProjectVersion[];
+  /** Save the current project state as a named snapshot. */
+  saveActiveProjectVersion: (name: string) => Promise<{ ok: boolean; message?: string }>;
+  /** Restore a saved version — overwrites current schedule state. */
+  restoreProjectVersion: (versionId: string) => Promise<{ ok: boolean; message?: string }>;
+  /** Permanently delete a saved version. */
+  deleteProjectVersion: (versionId: string) => Promise<boolean>;
 
   // Undo/Redo
   undo: () => void;

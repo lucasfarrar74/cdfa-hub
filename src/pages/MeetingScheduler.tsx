@@ -13,6 +13,7 @@ import {
   SyncStatusIndicator,
   HistoryPanel,
   LiveChangeToasts,
+  VersionsPanel,
   KeyboardShortcutsHelp,
   NotificationSettings,
   ThemeToggle,
@@ -121,6 +122,7 @@ function SchedulerContent() {
                 <ThemeToggle />
                 <KeyboardShortcutsHelp />
                 <NotificationSettings />
+                <VersionsPanel />
                 <HistoryPanel />
                 <SyncStatusIndicator />
                 {activeProject && (

@@ -54,6 +54,15 @@ service cloud.firestore {
         allow read, create, update: if request.auth != null;
         allow delete: if false;
       }
+
+      // Named version snapshots — full serialized project state saved
+      // manually by admins ("Locked pre-event"), restoreable later.
+      // Delete is allowed so a client can trim the oldest when the
+      // ~20 cap is hit (see saveActiveProjectVersion in ScheduleContext).
+      match /versions/{versionId} {
+        allow read, create, delete: if request.auth != null;
+        allow update: if false;
+      }
     }
   }
 }

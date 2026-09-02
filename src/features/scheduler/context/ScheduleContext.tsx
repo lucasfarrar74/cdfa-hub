@@ -366,6 +366,9 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     activityEvents,
     logActivity,
     markActivityUndone,
+    projectVersions,
+    saveProjectVersion: saveProjectVersionInternal,
+    deleteProjectVersion,
     stopSync,
     disconnectProject: disconnectFromCloudInternal,
   } = useFirebaseSync({
@@ -896,6 +899,63 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     );
     return 'ok';
   }, [activeProject, saveToHistory, updateActiveProject, emitActivity, markActivityUndone]);
+
+  // Save the current active project state as a named version snapshot.
+  // Wraps the sync-layer's `saveProjectVersionInternal`, filling in
+  // the acting user's uid/name and dispatching to the active project.
+  const saveActiveProjectVersion = useCallback(
+    async (name: string): Promise<{ ok: boolean; message?: string }> => {
+      if (!activeProject?.isCloud) {
+        return { ok: false, message: 'Only cloud projects can be versioned.' };
+      }
+      const uid = auth.user?.uid || 'local-user';
+      const userName = auth.user?.displayName || auth.user?.email || undefined;
+      const result = await saveProjectVersionInternal(activeProject, name, { userId: uid, userName });
+      if (result.ok) {
+        emitActivity(
+          'auto_fix_applied', // reuse a non-undoable info type — no dedicated version_saved yet
+          `Saved version "${name.trim()}"`,
+          { kind: 'none' },
+          {},
+        );
+      }
+      return { ok: result.ok, message: result.message };
+    },
+    [activeProject, auth.user, saveProjectVersionInternal, emitActivity],
+  );
+
+  // Restore the schedule to a named version snapshot. Overwrites the
+  // active project's meetings, timeSlots, unscheduledPairs, and
+  // eventConfig from the saved snapshot — leaves suppliers/buyers/
+  // ownership/collaborators as they are (those are participant lists,
+  // not scheduling state). Confirmation is the caller's responsibility.
+  const restoreProjectVersion = useCallback(
+    async (versionId: string): Promise<{ ok: boolean; message?: string }> => {
+      if (!activeProject) return { ok: false, message: 'No active project.' };
+      const version = projectVersions.find(v => v.id === versionId);
+      if (!version) return { ok: false, message: 'Version not found.' };
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        meetings: version.project.meetings || [],
+        timeSlots: (version.project.timeSlots || []).map(slot => ({
+          ...slot,
+          startTime: slot.startTime instanceof Date ? slot.startTime : new Date(slot.startTime),
+          endTime: slot.endTime instanceof Date ? slot.endTime : new Date(slot.endTime),
+        })),
+        unscheduledPairs: version.project.unscheduledPairs || [],
+        eventConfig: version.project.eventConfig ?? project.eventConfig,
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Restored version "${version.name}"`,
+        { kind: 'none' },
+        {},
+      );
+      return { ok: true };
+    },
+    [activeProject, projectVersions, saveToHistory, updateActiveProject, emitActivity],
+  );
 
   // Meeting operations
   const updateMeetingStatus = useCallback((meetingId: string, status: MeetingStatus) => {
@@ -1547,6 +1607,10 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setFocusedMeeting,
     activityEvents,
     applyActivityUndo,
+    projectVersions,
+    saveActiveProjectVersion,
+    restoreProjectVersion,
+    deleteProjectVersion,
 
     // Undo/Redo
     undo,
@@ -1617,6 +1681,10 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setFocusedMeeting,
     activityEvents,
     applyActivityUndo,
+    projectVersions,
+    saveActiveProjectVersion,
+    restoreProjectVersion,
+    deleteProjectVersion,
     undo,
     redo,
     historyState,
