@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import type { Location } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MainLayout } from './components/layout/MainLayout';
 import { LoginPage } from './components/auth/LoginPage';
@@ -15,6 +16,7 @@ import './index.css';
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isConfigured } = useAuth();
+  const location = useLocation();
 
   // Show loading spinner while checking auth
   if (isLoading) {
@@ -33,9 +35,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Redirect to login if not authenticated
+  // Redirect to login if not authenticated. Preserve the intended URL
+  // (including the ?share=... query string on share links) via router
+  // state so PublicRoute can send the user back to it after login.
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;
@@ -44,6 +48,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 // Public route wrapper - redirects to dashboard if already logged in
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading, isConfigured } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -61,9 +66,14 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Redirect to dashboard if already authenticated
+  // Redirect back to the original destination if the user came here via
+  // ProtectedRoute (which stashes `from` in router state) — this is what
+  // preserves a `/meeting-scheduler?share=...` URL across the login
+  // bounce. Falls back to the dashboard when there's no stashed location.
   if (user) {
-    return <Navigate to="/" replace />;
+    const from = (location.state as { from?: Location } | null)?.from;
+    const destination = from ? `${from.pathname}${from.search}${from.hash}` : '/';
+    return <Navigate to={destination} replace />;
   }
 
   return <>{children}</>;

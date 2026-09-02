@@ -69,7 +69,7 @@ export default function ShareDialog({ isOpen, onClose, projectId }: ShareDialogP
 
   const handleCopyLink = () => {
     if (project?.shareId) {
-      const shareUrl = `${window.location.origin}?share=${project.shareId}`;
+      const shareUrl = `${window.location.origin}/meeting-scheduler?share=${project.shareId}`;
       navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -154,7 +154,7 @@ export default function ShareDialog({ isOpen, onClose, projectId }: ShareDialogP
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    value={`${window.location.origin}?share=${project?.shareId}`}
+                    value={`${window.location.origin}/meeting-scheduler?share=${project?.shareId}`}
                     readOnly
                     className="flex-1 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
                   />
