@@ -9,6 +9,7 @@ import {
   query,
   where,
   updateDoc,
+  arrayUnion,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
@@ -227,6 +228,14 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     currentProjectIdRef.current = project.id;
     setSyncStatus('syncing');
 
+    // One-shot bootstrap on first snapshot: add ourselves to this
+    // project's collaborators array. Without this the cross-device
+    // discovery query (which filters by ownerId or collaborators-
+    // contains uid) never returns this project for a non-owner user,
+    // so opening a shared link on device A wouldn't make the project
+    // discoverable on device B for the same account.
+    let hasAttemptedEnrollment = false;
+
     // Subscribe to project changes
     const projectRef = doc(instances.db, 'projects', project.shareId);
     unsubscribeRef.current = onSnapshot(
@@ -238,6 +247,25 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
         }
 
         const remoteProject = firestoreToProject(snapshot.data() as Record<string, unknown>);
+
+        // Auto-enrol as collaborator once we've seen the first
+        // successful snapshot. Uses arrayUnion so parallel enrollments
+        // from other users don't clobber each other. Fire-and-forget:
+        // if it fails (e.g. offline), sync still works — discovery is
+        // just degraded until the next successful sync.
+        if (!hasAttemptedEnrollment) {
+          hasAttemptedEnrollment = true;
+          const currentUid = getEffectiveUserId();
+          if (currentUid) {
+            const isOwner = remoteProject.ownerId === currentUid;
+            const alreadyCollaborator = (remoteProject.collaborators ?? []).includes(currentUid);
+            if (!isOwner && !alreadyCollaborator) {
+              updateDoc(projectRef, { collaborators: arrayUnion(currentUid) })
+                .then(() => console.log('[enroll] added self to collaborators of', remoteProject.shareId))
+                .catch(err => console.warn('[enroll] failed to add self to collaborators:', err));
+            }
+          }
+        }
 
         // Skip if this is our own update
         if (lastLocalUpdateRef.current === remoteProject.updatedAt) {
