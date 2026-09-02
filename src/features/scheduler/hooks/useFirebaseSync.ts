@@ -9,6 +9,7 @@ import {
   query,
   where,
   updateDoc,
+  runTransaction,
   arrayUnion,
   serverTimestamp,
   Timestamp,
@@ -22,6 +23,7 @@ import {
 } from '../lib/firebase';
 import type { Project, SyncStatus, ActiveCollaborator, SyncError } from '../types';
 import { findAllDoubleBookings } from '../utils/conflictDetection';
+import { computeSyncOutcome, getProjectRevision } from '../utils/syncOutcome';
 
 function extractSyncError(err: unknown, operation: SyncError['operation']): SyncError {
   if (err instanceof Error) {
@@ -103,6 +105,15 @@ interface UseFirebaseSyncReturn {
   openProject: (shareId: string) => Promise<Project | null>;
   syncProject: (project: Project) => void;
   /**
+   * Push a project's changes to Firestore atomically. Returns:
+   * - 'proceed'  on success (revision matched, write committed)
+   * - 'conflict' when a teammate saved first — the caller should NOT
+   *              retry; a red toast is already surfaced via
+   *              `lastSyncError`, and onSnapshot brings fresh state
+   * - 'error'    for anything else (network, permission, etc.)
+   */
+  syncProjectChanges: (project: Project) => Promise<'proceed' | 'conflict' | 'error'>;
+  /**
    * Tell the sync layer which meeting this user is currently focused on
    * (hovering, editing, dragging). Writes to the presence doc with a
    * per-user 500ms throttle. Pass `null` to clear focus.
@@ -128,6 +139,11 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   const presenceUnsubscribeRef = useRef<Unsubscribe | null>(null);
   const currentProjectIdRef = useRef<string | null>(null);
   const lastLocalUpdateRef = useRef<string | null>(null);
+  // Latest revision we've observed on the server for the active cloud
+  // project. Read inside runTransaction to decide whether our write is
+  // still up-to-date; updated on: uploadProject, openProject, every
+  // onSnapshot, and after a successful sync transaction commits.
+  const lastKnownRevisionRef = useRef<number>(0);
 
   // Note: Auth is now handled by AuthContext which will call setOverrideUserId
 
@@ -163,12 +179,14 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
         ownerId: userId,
         shareId,
         collaborators: project.collaborators || [],
+        revision: 1, // first cloud write establishes the concurrency counter
       };
 
       // Store project in Firestore
       const projectRef = doc(instances.db, 'projects', shareId);
       await setDoc(projectRef, projectToFirestore(cloudProject));
 
+      lastKnownRevisionRef.current = 1;
       setSyncStatus('synced');
       setLastSyncError(null);
       return shareId;
@@ -204,6 +222,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       }
 
       const project = firestoreToProject(projectSnap.data() as Record<string, unknown>);
+      lastKnownRevisionRef.current = getProjectRevision(project);
       setSyncStatus('synced');
       setLastSyncError(null);
       return project;
@@ -254,6 +273,12 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
         }
 
         const remoteProject = firestoreToProject(snapshot.data() as Record<string, unknown>);
+
+        // Track the server's revision so subsequent transactional writes
+        // know what we're basing our change on. Kept fresh on every
+        // snapshot (whether it's a teammate's write, our own echo, or
+        // this initial fetch).
+        lastKnownRevisionRef.current = getProjectRevision(remoteProject);
 
         // Auto-enrol as collaborator once we've seen the first
         // successful snapshot. Uses arrayUnion so parallel enrollments
@@ -445,6 +470,85 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     // The project remains in the cloud for other collaborators
   }, [stopSync]);
 
+  /**
+   * Push a project's changes to Firestore inside an atomic transaction.
+   *
+   * Rejects (and returns 'conflict') when the server revision has moved
+   * past what we last observed — that's the signal a teammate saved
+   * first, and we must NOT overwrite them. The caller (usually the
+   * debounced sync in ScheduleContext) surfaces a red toast so the
+   * user knows to redo their action against the fresh state.
+   *
+   * On success, increments the server revision atomically. Also flushes
+   * `lastKnownRevisionRef` immediately, so a follow-up write in the
+   * same tick uses the freshest counter and doesn't self-conflict
+   * before the onSnapshot echo catches up.
+   */
+  const syncProjectChanges = useCallback(
+    async (projectData: Project): Promise<'proceed' | 'conflict' | 'error'> => {
+      if (!projectData.isCloud || !projectData.shareId) return 'proceed';
+
+      const instances = getFirebaseInstances();
+      if (!instances) return 'error';
+
+      const projectRef = doc(instances.db, 'projects', projectData.shareId);
+      const baseRevision = lastKnownRevisionRef.current;
+
+      try {
+        const nextRevision = await runTransaction(instances.db, async (tx) => {
+          const snap = await tx.get(projectRef);
+          if (!snap.exists()) {
+            throw new Error('project-missing');
+          }
+          const serverProject = firestoreToProject(snap.data() as Record<string, unknown>);
+          const serverRevision = getProjectRevision(serverProject);
+
+          const outcome = computeSyncOutcome(baseRevision, serverRevision, projectData.meetings);
+          if (outcome === 'conflict') {
+            const err = new Error(
+              `Sync conflict: local base rev ${baseRevision} is behind server rev ${serverRevision}. A teammate saved first.`,
+            );
+            (err as Error & { code?: string }).code = 'sync-conflict';
+            throw err;
+          }
+          if (outcome === 'would-double-book') {
+            const err = new Error('Refused write — outgoing meetings contain a double-booking.');
+            (err as Error & { code?: string }).code = 'would-double-book';
+            throw err;
+          }
+
+          const rev = serverRevision + 1;
+          tx.update(projectRef, {
+            ...projectToFirestore(projectData),
+            revision: rev,
+          });
+          return rev;
+        });
+
+        lastKnownRevisionRef.current = nextRevision;
+        console.log('[sync-tx] committed revision', nextRevision);
+        reportSyncError(null);
+        return 'proceed';
+      } catch (error) {
+        const code = (error as Error & { code?: string }).code;
+        if (code === 'sync-conflict') {
+          console.warn('[sync-tx] conflict — teammate saved first');
+          reportSyncError({
+            message:
+              "Sync conflict: a teammate saved a change before yours. Your last edit wasn't kept — please redo it on the fresh schedule.",
+            code: 'sync-conflict',
+            operation: 'write',
+          });
+          return 'conflict';
+        }
+        console.error('[sync-tx] failed:', error);
+        reportSyncError(extractSyncError(error, 'write'));
+        return 'error';
+      }
+    },
+    [reportSyncError],
+  );
+
   return {
     isEnabled,
     syncStatus,
@@ -455,6 +559,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     uploadProject,
     openProject,
     syncProject,
+    syncProjectChanges,
     setFocusedMeeting,
     stopSync,
     disconnectProject,
@@ -551,45 +656,8 @@ export function useDiscoveredCloudProjects(userId: string | null): DiscoveryStat
   return { discovered, loading, error };
 }
 
-// Hook to sync project changes to Firestore.
-// onSyncResult is called with the SyncError on failure, or null on success
-// (callers can use it to clear a previous error indicator).
-export function useSyncProjectChanges(
-  project: Project | null,
-  syncStatus: SyncStatus,
-  onSyncResult?: (error: SyncError | null) => void,
-): (projectData: Project) => Promise<void> {
-  const syncChanges = useCallback(async (projectData: Project) => {
-    if (!project?.isCloud || !project.shareId || syncStatus !== 'synced') {
-      console.log('[Sync] Skipping sync - not a cloud project or not synced');
-      return;
-    }
-
-    const instances = getFirebaseInstances();
-    if (!instances) {
-      console.log('[Sync] Skipping sync - Firebase not configured');
-      return;
-    }
-
-    try {
-      console.log('[Sync] Syncing project changes to cloud:', {
-        shareId: project.shareId,
-        meetingsCount: projectData.meetings?.length ?? 0,
-      });
-
-      const projectRef = doc(instances.db, 'projects', project.shareId);
-
-      // Use the full serialization to ensure Date objects are converted
-      const serializedData = projectToFirestore(projectData);
-
-      await updateDoc(projectRef, serializedData);
-      console.log('[Sync] Successfully synced to cloud');
-      onSyncResult?.(null);
-    } catch (error) {
-      console.error('[Sync] Failed to sync changes:', error);
-      onSyncResult?.(extractSyncError(error, 'write'));
-    }
-  }, [project, syncStatus, onSyncResult]);
-
-  return syncChanges;
-}
+// (`useSyncProjectChanges` was removed in favour of the transactional
+// `syncProjectChanges` callback returned from `useFirebaseSync`. It
+// used `updateDoc` non-atomically, which was the source of the
+// two-admin lost-write race — see docs/collaboration-workflow-plan.md
+// item C.)

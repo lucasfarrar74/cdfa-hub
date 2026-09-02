@@ -167,6 +167,14 @@ export interface Project {
   // Google Sheets export
   googleSheetsId?: string;     // Spreadsheet ID of the linked Google Sheet, if pushed
   googleSheetsUrl?: string;    // Full URL of the linked Sheet (for display/copy)
+
+  // Optimistic-concurrency counter. Incremented atomically inside a
+  // Firestore transaction on every cloud write. Clients that start a
+  // write with a stale `revision` get rejected (sync-conflict), which
+  // is how two admins editing within the 500ms debounce window are
+  // prevented from silently overwriting each other. Absent on legacy
+  // projects; treated as 0. See useSyncProjectChanges + computeSyncOutcome.
+  revision?: number;
 }
 
 // Sync status for cloud projects

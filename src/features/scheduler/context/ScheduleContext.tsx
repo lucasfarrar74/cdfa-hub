@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { useFirebaseSync, useSyncProjectChanges, useDiscoveredCloudProjects } from '../hooks/useFirebaseSync';
+import { useFirebaseSync, useDiscoveredCloudProjects } from '../hooks/useFirebaseSync';
 import { useHistoryTracker } from '../hooks/useHistory';
 import { useAuth } from '../../../context/AuthContext';
 import { mergeDiscoveredProjects } from '../utils/mergeDiscoveredProjects';
@@ -354,11 +354,11 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     syncStatus,
     activeCollaborators,
     lastSyncError,
-    reportSyncError,
     remoteIntegrityWarning,
     uploadProject,
     openProject,
     syncProject,
+    syncProjectChanges,
     setFocusedMeeting,
     stopSync,
     disconnectProject: disconnectFromCloudInternal,
@@ -385,9 +385,11 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }
   }, [activeProject, syncProject, stopSync]);
 
-  // Cloud sync: Push local changes to Firebase. Write errors are surfaced
-  // through the same lastSyncError state that read errors use.
-  const syncChangesToCloud = useSyncProjectChanges(activeProject, syncStatus, reportSyncError);
+  // Cloud sync: Push local changes to Firebase inside a transaction.
+  // If the transaction reports 'conflict' (a teammate saved first),
+  // the mutation error toast is already surfaced via `reportSyncError`;
+  // we additionally clear the undo history because it's stale relative
+  // to whatever the incoming onSnapshot is about to bring in.
   const syncDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debounced sync function to avoid excessive Firebase writes
@@ -402,10 +404,16 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }
 
     // Debounce: wait 500ms before syncing
-    syncDebounceRef.current = setTimeout(() => {
-      syncChangesToCloud(project);
+    syncDebounceRef.current = setTimeout(async () => {
+      const outcome = await syncProjectChanges(project);
+      if (outcome === 'conflict') {
+        // Undo stack pre-dates the teammate's landing write; nothing
+        // in it can be safely applied against the newer server state.
+        historyTracker.clear();
+        setHistoryState({ canUndo: false, canRedo: false });
+      }
     }, 500);
-  }, [syncStatus, syncChangesToCloud]);
+  }, [syncStatus, syncProjectChanges, historyTracker]);
 
   // Cleanup debounce timeout on unmount
   useEffect(() => {
