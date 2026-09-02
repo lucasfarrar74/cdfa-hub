@@ -12,6 +12,7 @@ import {
   ScheduleIntegrityBanner,
   SyncStatusIndicator,
   HistoryPanel,
+  LiveChangeToasts,
   KeyboardShortcutsHelp,
   NotificationSettings,
   ThemeToggle,
@@ -172,6 +173,10 @@ function SchedulerContent() {
       {/* Guard-rejection toast (double-booking blocks, etc.) — sits over
           any tab; only renders when a mutation was refused. */}
       <ScheduleErrorToast />
+
+      {/* Live-change notifications — corner toasts announcing what
+          teammates just did. Only renders on a cloud project. */}
+      <LiveChangeToasts />
     </div>
   );
 }

@@ -7,6 +7,7 @@ export { default as CrossDayMoveModal } from './CrossDayMoveModal';
 export { default as EventConfigPanel } from './EventConfigPanel';
 export { default as ExportPanel } from './ExportPanel';
 export { default as HistoryPanel } from './HistoryPanel';
+export { default as LiveChangeToasts } from './LiveChangeToasts';
 export { default as KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 export { default as MobileScheduleView } from './MobileScheduleView';
 export { default as NotificationSettings } from './NotificationSettings';
