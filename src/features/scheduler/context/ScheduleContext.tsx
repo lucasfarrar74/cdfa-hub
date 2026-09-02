@@ -359,6 +359,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     uploadProject,
     openProject,
     syncProject,
+    setFocusedMeeting,
     stopSync,
     disconnectProject: disconnectFromCloudInternal,
   } = useFirebaseSync({
@@ -1370,6 +1371,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     uploadProjectToCloud,
     openCloudProject,
     disconnectFromCloud,
+    setFocusedMeeting,
 
     // Undo/Redo
     undo,
@@ -1437,6 +1439,7 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     uploadProjectToCloud,
     openCloudProject,
     disconnectFromCloud,
+    setFocusedMeeting,
     undo,
     redo,
     historyState,

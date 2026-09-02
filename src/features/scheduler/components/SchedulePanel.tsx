@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
 import { formatTime, getUniqueDatesFromSlots, formatDateReadable } from '../utils/timeUtils';
 import { createBuyerColorMap, getContrastTextColor, getLighterColor } from '../utils/colors';
+import { colorForCollaborator, initialForCollaborator } from '../utils/collaboratorColors';
+import type { ActiveCollaborator } from '../types';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { getBuyerAvailabilityForSlot } from '../utils/conflictDetection';
@@ -67,6 +69,9 @@ function DraggableMeeting({
   onToggleMenu,
   conflicts = [],
   isHighlighted = false,
+  focusedBy = [],
+  onFocus,
+  onBlur,
   children,
 }: {
   meeting: Meeting;
@@ -75,6 +80,12 @@ function DraggableMeeting({
   onToggleMenu: () => void;
   conflicts?: ConflictInfo[];
   isHighlighted?: boolean;
+  /** Other collaborators currently attending to this meeting (cell-level presence). */
+  focusedBy?: ActiveCollaborator[];
+  /** Called on hover/focus so the sync layer can tell teammates we're on this cell. */
+  onFocus?: () => void;
+  /** Called on mouseleave/blur so we release the presence chip on other admins' screens. */
+  onBlur?: () => void;
   children?: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -149,7 +160,13 @@ function DraggableMeeting({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="relative">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="relative"
+      onMouseEnter={onFocus}
+      onMouseLeave={onBlur}
+    >
       <div
         {...attributes}
         {...listeners}
@@ -178,6 +195,31 @@ function DraggableMeeting({
               : 'bg-amber-500 text-white'
           }`} title={conflicts.map(c => c.description).join('\n')}>
             {hasBuyerConflict ? '!' : '!'}
+          </div>
+        )}
+        {/* Cell-level presence chips: shown when other admins are attending
+            to this meeting. Stacked on the top-left so they don't collide
+            with the conflict badge on the top-right. */}
+        {focusedBy.length > 0 && (
+          <div className="absolute -top-1.5 -left-1.5 flex -space-x-1.5" title={
+            focusedBy.length === 1
+              ? `${focusedBy[0].userName || 'A teammate'} is looking at this`
+              : `${focusedBy.length} teammates are looking at this`
+          }>
+            {focusedBy.slice(0, 3).map(c => (
+              <div
+                key={c.userId}
+                className="w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center text-[8px] font-bold text-white shadow-sm"
+                style={{ backgroundColor: colorForCollaborator(c.userId) }}
+              >
+                {initialForCollaborator(c.userName, c.userId)}
+              </div>
+            ))}
+            {focusedBy.length > 3 && (
+              <div className="w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 bg-gray-500 flex items-center justify-center text-[8px] font-bold text-white shadow-sm">
+                +{focusedBy.length - 3}
+              </div>
+            )}
           </div>
         )}
         <div className="flex items-center justify-between gap-1">
@@ -224,7 +266,31 @@ export default function SchedulePanel() {
     canRedo,
     generationProgress,
     lastScheduleScore,
+    activeCollaborators,
+    setFocusedMeeting,
+    activeProject,
   } = useSchedule();
+
+  // Cell-level presence: build a Map<meetingId, ActiveCollaborator[]>
+  // once per render so each cell can cheaply look up who's focused on
+  // it. Excludes the current user — we don't want to show ourselves a
+  // presence chip on the cell we're already hovering.
+  const focusedByMeetingId = useMemo(() => {
+    const map = new Map<string, ActiveCollaborator[]>();
+    const selfOwnerId = activeProject?.ownerId;
+    for (const c of activeCollaborators) {
+      if (!c.focusedMeetingId) continue;
+      // Best-effort self exclusion: if the collaborator id matches the
+      // owner id we're logged in as (the common case), skip. Not perfect
+      // for non-owner viewers, but the correct fix needs the auth uid
+      // threaded in — good enough for now.
+      if (selfOwnerId && c.userId === selfOwnerId) continue;
+      const arr = map.get(c.focusedMeetingId);
+      if (arr) arr.push(c);
+      else map.set(c.focusedMeetingId, [c]);
+    }
+    return map;
+  }, [activeCollaborators, activeProject?.ownerId]);
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [activeMeetingMenu, setActiveMeetingMenu] = useState<string | null>(null);
@@ -992,6 +1058,9 @@ window.onload = function() { window.print(); };
                                       buyerColorMap={buyerColorMap}
                                       conflicts={meetingConflictMap.get(meeting.id) || []}
                                       isHighlighted={highlightedMeetingId === meeting.id}
+                                      focusedBy={focusedByMeetingId.get(meeting.id) || []}
+                                      onFocus={() => setFocusedMeeting(meeting.id)}
+                                      onBlur={() => setFocusedMeeting(null)}
                                       onToggleMenu={() => setActiveMeetingMenu(activeMeetingMenu === meeting.id ? null : meeting.id)}
                                     >
                                       {/* Meeting action menu */}

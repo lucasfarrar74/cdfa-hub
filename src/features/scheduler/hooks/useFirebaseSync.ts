@@ -102,6 +102,12 @@ interface UseFirebaseSyncReturn {
   uploadProject: (project: Project) => Promise<string | null>;
   openProject: (shareId: string) => Promise<Project | null>;
   syncProject: (project: Project) => void;
+  /**
+   * Tell the sync layer which meeting this user is currently focused on
+   * (hovering, editing, dragging). Writes to the presence doc with a
+   * per-user 500ms throttle. Pass `null` to clear focus.
+   */
+  setFocusedMeeting: (meetingId: string | null) => void;
   stopSync: () => void;
   disconnectProject: (projectId: string) => void;
 }
@@ -226,6 +232,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     }
 
     currentProjectIdRef.current = project.id;
+    activeSyncedShareIdRef.current = project.shareId;
     setSyncStatus('syncing');
 
     // One-shot bootstrap on first snapshot: add ourselves to this
@@ -319,6 +326,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
               userId: doc.id,
               userName: data.userName,
               lastSeen: lastSeen.toISOString(),
+              focusedMeetingId: typeof data.focusedMeetingId === 'string' ? data.focusedMeetingId : null,
             });
           }
         });
@@ -327,7 +335,10 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       }
     );
 
-    // Update our presence
+    // Update our presence heartbeat. Kept small on purpose — cell-level
+    // focus goes through a separate throttled path (see focusedMeetingIdRef
+    // and updateFocusedMeeting below) so that intent to focus doesn't
+    // wait for the 30s heartbeat.
     const updatePresence = async () => {
       let userId = getEffectiveUserId();
 
@@ -347,7 +358,8 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
         await setDoc(presenceDocRef, {
           lastSeen: serverTimestamp(),
           userName: `User ${userId.slice(0, 4)}`,
-        });
+          focusedMeetingId: focusedMeetingIdRef.current,
+        }, { merge: true });
       } catch (error) {
         console.error('Failed to update presence:', error);
       }
@@ -367,6 +379,44 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     setSyncStatus('synced');
   }, [isEnabled, onProjectUpdate, onError]);
 
+  // Cell-level focus: which meeting is this user currently attending to.
+  // Written to the presence doc with a 500 ms throttle so hover storms
+  // don't spam Firestore. `activeSyncedShareIdRef` tracks the project
+  // whose sync is currently active — set when syncProject starts,
+  // cleared when it stops — so the throttled writer knows where to
+  // write without capturing shareId in a closure.
+  const focusedMeetingIdRef = useRef<string | null>(null);
+  const focusFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeSyncedShareIdRef = useRef<string | null>(null);
+
+  const flushFocusedMeeting = useCallback(async () => {
+    const instances = getFirebaseInstances();
+    const userId = getEffectiveUserId();
+    const activeShareId = activeSyncedShareIdRef.current;
+    if (!instances || !userId || !activeShareId) return;
+    try {
+      const presenceDocRef = doc(instances.db, 'projects', activeShareId, 'presence', userId);
+      await setDoc(presenceDocRef, {
+        lastSeen: serverTimestamp(),
+        userName: `User ${userId.slice(0, 4)}`,
+        focusedMeetingId: focusedMeetingIdRef.current,
+      }, { merge: true });
+    } catch (error) {
+      console.warn('[presence] focus write failed:', error);
+    }
+  }, []);
+
+  const setFocusedMeeting = useCallback((meetingId: string | null) => {
+    if (focusedMeetingIdRef.current === meetingId) return;
+    focusedMeetingIdRef.current = meetingId;
+    // Coalesce rapid hover changes into one write per 500ms window.
+    if (focusFlushTimerRef.current) return;
+    focusFlushTimerRef.current = setTimeout(() => {
+      focusFlushTimerRef.current = null;
+      flushFocusedMeeting();
+    }, 500);
+  }, [flushFocusedMeeting]);
+
   // Stop syncing
   const stopSync = useCallback(() => {
     if (unsubscribeRef.current) {
@@ -377,6 +427,12 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       presenceUnsubscribeRef.current();
       presenceUnsubscribeRef.current = null;
     }
+    if (focusFlushTimerRef.current) {
+      clearTimeout(focusFlushTimerRef.current);
+      focusFlushTimerRef.current = null;
+    }
+    focusedMeetingIdRef.current = null;
+    activeSyncedShareIdRef.current = null;
     currentProjectIdRef.current = null;
     setActiveCollaborators([]);
     setSyncStatus('offline');
@@ -399,6 +455,7 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     uploadProject,
     openProject,
     syncProject,
+    setFocusedMeeting,
     stopSync,
     disconnectProject,
   };

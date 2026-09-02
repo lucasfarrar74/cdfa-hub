@@ -184,6 +184,13 @@ export interface ActiveCollaborator {
   userId: string;
   userName?: string;
   lastSeen: string;
+  // Cell-level presence: the id of the meeting this collaborator is
+  // currently focused on (hovering / opened menu / dragging). Null or
+  // absent means they're viewing the project but not attending to a
+  // specific meeting. Used to render presence chips on meeting cells
+  // so teammates can see what each other is working on and avoid
+  // stepping on the same edit.
+  focusedMeetingId?: string | null;
 }
 
 // Activity event for collaboration feed
@@ -353,6 +360,12 @@ export interface ScheduleContextType extends ScheduleState {
   uploadProjectToCloud: (projectId: string) => Promise<string | null>;
   openCloudProject: (shareId: string) => Promise<Project | null>;
   disconnectFromCloud: (projectId: string) => void;
+  /**
+   * Cell-level presence — tell the sync layer this user is now attending
+   * to a specific meeting (or `null` to clear). Consumed as a no-op when
+   * the active project isn't a cloud project.
+   */
+  setFocusedMeeting: (meetingId: string | null) => void;
 
   // Undo/Redo
   undo: () => void;
