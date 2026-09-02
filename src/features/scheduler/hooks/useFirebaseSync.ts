@@ -139,6 +139,19 @@ interface UseFirebaseSyncReturn {
   ) => Promise<{ ok: boolean; versionId?: string; message?: string }>;
   /** Delete a saved version snapshot. */
   deleteProjectVersion: (versionId: string) => Promise<boolean>;
+  /**
+   * Remove a collaborator's uid from the active project's `collaborators`
+   * array. Meant to be called by the owner (client-side check — the
+   * Firestore rules stay permissive for 3-5 trusted admins). Returns
+   * true on success.
+   */
+  removeCollaborator: (shareId: string, uid: string) => Promise<boolean>;
+  /**
+   * Transfer project ownership: swap `ownerId` with a uid currently in
+   * `collaborators`, and move the previous owner into `collaborators`
+   * so they retain access.
+   */
+  transferOwnership: (shareId: string, newOwnerUid: string, currentOwnerUid: string) => Promise<boolean>;
   stopSync: () => void;
   disconnectProject: (projectId: string) => void;
 }
@@ -585,6 +598,69 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
   }, []);
 
   /**
+   * Remove a uid from a project's collaborators array. Uses a
+   * transaction to avoid clobbering concurrent edits to the array.
+   */
+  const removeCollaborator = useCallback(
+    async (shareId: string, uid: string): Promise<boolean> => {
+      const instances = getFirebaseInstances();
+      if (!instances) return false;
+      try {
+        const projectRef = doc(instances.db, 'projects', shareId);
+        await runTransaction(instances.db, async (tx) => {
+          const snap = await tx.get(projectRef);
+          if (!snap.exists()) throw new Error('project-missing');
+          const data = snap.data() as { collaborators?: string[] };
+          const current = Array.isArray(data.collaborators) ? data.collaborators : [];
+          const next = current.filter(id => id !== uid);
+          tx.update(projectRef, { collaborators: next });
+        });
+        return true;
+      } catch (err) {
+        console.error('[collab] remove failed:', err);
+        return false;
+      }
+    },
+    [],
+  );
+
+  /**
+   * Transfer project ownership. The new owner MUST already be in
+   * `collaborators`; the old owner gets moved into `collaborators` so
+   * they retain access. Runs atomically so a race can't leave the
+   * project ownerless.
+   */
+  const transferOwnership = useCallback(
+    async (shareId: string, newOwnerUid: string, currentOwnerUid: string): Promise<boolean> => {
+      const instances = getFirebaseInstances();
+      if (!instances) return false;
+      try {
+        const projectRef = doc(instances.db, 'projects', shareId);
+        await runTransaction(instances.db, async (tx) => {
+          const snap = await tx.get(projectRef);
+          if (!snap.exists()) throw new Error('project-missing');
+          const data = snap.data() as { collaborators?: string[]; ownerId?: string };
+          const current = Array.isArray(data.collaborators) ? data.collaborators : [];
+          // New owner leaves collaborators; old owner joins.
+          const next = current.filter(id => id !== newOwnerUid);
+          if (currentOwnerUid && !next.includes(currentOwnerUid)) {
+            next.push(currentOwnerUid);
+          }
+          tx.update(projectRef, {
+            ownerId: newOwnerUid,
+            collaborators: next,
+          });
+        });
+        return true;
+      } catch (err) {
+        console.error('[collab] transfer failed:', err);
+        return false;
+      }
+    },
+    [],
+  );
+
+  /**
    * Save the current project state as a named version snapshot.
    * Enforces a client-side cap of 20 snapshots by deleting the oldest
    * when writing beyond that (soft cap — the Firestore rules permit
@@ -761,6 +837,8 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
     projectVersions,
     saveProjectVersion,
     deleteProjectVersion,
+    removeCollaborator,
+    transferOwnership,
     stopSync,
     disconnectProject,
   };

@@ -369,6 +369,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     projectVersions,
     saveProjectVersion: saveProjectVersionInternal,
     deleteProjectVersion,
+    removeCollaborator,
+    transferOwnership,
     stopSync,
     disconnectProject: disconnectFromCloudInternal,
   } = useFirebaseSync({
@@ -1611,6 +1613,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     saveActiveProjectVersion,
     restoreProjectVersion,
     deleteProjectVersion,
+    removeCollaborator,
+    transferOwnership,
 
     // Undo/Redo
     undo,
@@ -1685,6 +1689,8 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     saveActiveProjectVersion,
     restoreProjectVersion,
     deleteProjectVersion,
+    removeCollaborator,
+    transferOwnership,
     undo,
     redo,
     historyState,

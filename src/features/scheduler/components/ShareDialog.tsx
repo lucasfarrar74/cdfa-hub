@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useSchedule } from '../context/ScheduleContext';
+import { useAuth } from '../../../context/AuthContext';
+import { colorForCollaborator, initialForCollaborator } from '../utils/collaboratorColors';
 
 interface ShareDialogProps {
   isOpen: boolean;
@@ -14,7 +16,12 @@ export default function ShareDialog({ isOpen, onClose, projectId }: ShareDialogP
     uploadProjectToCloud,
     openCloudProject,
     disconnectFromCloud,
+    activeCollaborators,
+    removeCollaborator,
+    transferOwnership,
   } = useSchedule();
+  const { user } = useAuth();
+  const [collabBusy, setCollabBusy] = useState<string | null>(null);
 
   const [isUploading, setIsUploading] = useState(false);
   const [joinShareId, setJoinShareId] = useState('');
@@ -166,6 +173,122 @@ export default function ShareDialog({ isOpen, onClose, projectId }: ShareDialogP
                   </button>
                 </div>
               </div>
+
+              {/* People with access: owner + collaborators. Owner-only
+                  actions (Remove, Transfer) are gated client-side.
+                  Anyone can Leave themselves. Display names are best-
+                  effort from the presence list (only shows for users
+                  online right now); everyone else shows as their uid. */}
+              {project && (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    People with access
+                  </label>
+                  <ul className="border border-gray-200 dark:border-gray-700 rounded divide-y divide-gray-200 dark:divide-gray-700">
+                    {[
+                      ...(project.ownerId ? [{ uid: project.ownerId, role: 'owner' as const }] : []),
+                      ...((project.collaborators || []).map(uid => ({ uid, role: 'collaborator' as const }))),
+                    ].map(({ uid, role }) => {
+                      const presence = activeCollaborators.find(c => c.userId === uid);
+                      const displayName = presence?.userName;
+                      const isSelf = user?.uid === uid;
+                      const currentUserIsOwner = user?.uid === project.ownerId;
+                      const color = colorForCollaborator(uid);
+                      const initial = initialForCollaborator(displayName, uid);
+                      return (
+                        <li key={uid} className="p-2 flex items-center gap-2">
+                          <div
+                            className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                            style={{ backgroundColor: color }}
+                          >
+                            {initial}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-gray-900 dark:text-gray-100 truncate">
+                              {displayName || `User ${uid.slice(0, 6)}`}
+                              {isSelf && <span className="ml-1 text-xs text-gray-500">(you)</span>}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {role === 'owner' ? 'Owner' : 'Collaborator'}
+                              {presence && <span className="ml-1 text-green-600 dark:text-green-400">· online now</span>}
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0 flex gap-1">
+                            {role === 'collaborator' && currentUserIsOwner && !isSelf && (
+                              <>
+                                <button
+                                  onClick={async () => {
+                                    const ok = window.confirm(
+                                      `Transfer ownership to ${displayName || `User ${uid.slice(0, 6)}`}?\n\nYou'll remain as a collaborator with full edit access, but they'll become the project's owner.`,
+                                    );
+                                    if (!ok || !project.shareId || !project.ownerId) return;
+                                    setCollabBusy(uid);
+                                    try {
+                                      await transferOwnership(project.shareId, uid, project.ownerId);
+                                    } finally {
+                                      setCollabBusy(null);
+                                    }
+                                  }}
+                                  disabled={collabBusy === uid}
+                                  className="text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded disabled:opacity-50"
+                                  title="Make this user the owner"
+                                >
+                                  Transfer
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const ok = window.confirm(
+                                      `Remove ${displayName || `User ${uid.slice(0, 6)}`} from this project?\n\nThey'll lose access on their next visit.`,
+                                    );
+                                    if (!ok || !project.shareId) return;
+                                    setCollabBusy(uid);
+                                    try {
+                                      await removeCollaborator(project.shareId, uid);
+                                    } finally {
+                                      setCollabBusy(null);
+                                    }
+                                  }}
+                                  disabled={collabBusy === uid}
+                                  className="text-xs px-2 py-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded disabled:opacity-50"
+                                  title="Remove this user's access"
+                                >
+                                  Remove
+                                </button>
+                              </>
+                            )}
+                            {role === 'collaborator' && isSelf && (
+                              <button
+                                onClick={async () => {
+                                  const ok = window.confirm(
+                                    `Leave this project? You'll lose access on your next visit; the owner would have to add you back.`,
+                                  );
+                                  if (!ok || !project.shareId) return;
+                                  setCollabBusy(uid);
+                                  try {
+                                    await removeCollaborator(project.shareId, uid);
+                                  } finally {
+                                    setCollabBusy(null);
+                                  }
+                                }}
+                                disabled={collabBusy === uid}
+                                className="text-xs px-2 py-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                                title="Remove your own access"
+                              >
+                                Leave
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {user?.uid !== project.ownerId && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Only the owner can transfer ownership or remove other people.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <button
                 onClick={handleDisconnect}

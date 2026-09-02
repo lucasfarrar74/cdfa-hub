@@ -449,6 +449,18 @@ export interface ScheduleContextType extends ScheduleState {
   /** Permanently delete a saved version. */
   deleteProjectVersion: (versionId: string) => Promise<boolean>;
 
+  /**
+   * Remove a collaborator's uid from the active project. Owner-only in
+   * the UI; the Firestore rule is currently permissive (client-side
+   * check for a small trusted team — tighten in F+ if needed).
+   */
+  removeCollaborator: (shareId: string, uid: string) => Promise<boolean>;
+  /**
+   * Transfer ownership to a uid already in `collaborators`. The old
+   * owner is moved into `collaborators` so they keep access.
+   */
+  transferOwnership: (shareId: string, newOwnerUid: string, currentOwnerUid: string) => Promise<boolean>;
+
   // Undo/Redo
   undo: () => void;
   redo: () => void;
