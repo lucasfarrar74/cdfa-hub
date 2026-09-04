@@ -47,6 +47,29 @@ function generateShareId(): string {
   return result;
 }
 
+/**
+ * Turn an unknown value into a JS Date. Handles the three shapes we see
+ * from Firestore reads: a Firestore Timestamp (has `.toDate()`), an ISO
+ * string, or a value already a JS Date. Returns a valid Date object or,
+ * as a last resort, `new Date(0)` — never an Invalid Date, which is
+ * what triggered the "Invalid time value" error on version restore.
+ */
+function coerceToDate(value: unknown): Date {
+  if (value instanceof Date) return value;
+  if (value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    try {
+      return (value as { toDate: () => Date }).toDate();
+    } catch {
+      return new Date(0);
+    }
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    return Number.isFinite(d.getTime()) ? d : new Date(0);
+  }
+  return new Date(0);
+}
+
 // Convert Project to Firestore-safe format
 function projectToFirestore(project: Project): Record<string, unknown> {
   return {
@@ -401,8 +424,31 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
       (snap) => {
         const versions: ProjectVersion[] = [];
         snap.forEach((doc) => {
-          const data = doc.data() as Omit<ProjectVersion, 'id'>;
-          versions.push({ ...data, id: doc.id });
+          const raw = doc.data() as Record<string, unknown>;
+          // Coerce the embedded project's date-like fields back to
+          // real JS Dates. Versions written by the pre-fix build stored
+          // timeSlots' Dates as Firestore Timestamps; versions written
+          // by the fixed build store them as ISO strings. Handle both.
+          const rawProject = raw.project as Record<string, unknown> | undefined;
+          const project = rawProject
+            ? {
+                ...rawProject,
+                timeSlots: Array.isArray(rawProject.timeSlots)
+                  ? (rawProject.timeSlots as Array<Record<string, unknown>>).map(slot => ({
+                      ...slot,
+                      startTime: coerceToDate(slot.startTime),
+                      endTime: coerceToDate(slot.endTime),
+                    }))
+                  : [],
+              }
+            : rawProject;
+          versions.push({
+            id: doc.id,
+            name: (raw.name as string) ?? '',
+            createdAt: (raw.createdAt as string) ?? new Date(0).toISOString(),
+            createdBy: (raw.createdBy as ProjectVersion['createdBy']) ?? { userId: 'unknown' },
+            project: project as ProjectVersion['project'],
+          });
         });
         setProjectVersions(versions);
       },
@@ -704,14 +750,28 @@ export function useFirebaseSync(options: UseFirebaseSyncOptions = {}): UseFireba
           );
         }
 
-        const versionData: Omit<ProjectVersion, 'id'> = {
+        // Serialize the project's Date objects to ISO strings before
+        // handing to Firestore. Otherwise JS Dates auto-convert to
+        // Firestore Timestamps, and on read they come back as Timestamp
+        // objects (not JS Dates) — restore would then hit an "Invalid
+        // time value" when the restored timeSlots later try to
+        // ISO-stringify themselves during the next sync write.
+        const serializedProject = {
+          ...projectData,
+          timeSlots: projectData.timeSlots.map(slot => ({
+            ...slot,
+            startTime: slot.startTime instanceof Date ? slot.startTime.toISOString() : slot.startTime,
+            endTime: slot.endTime instanceof Date ? slot.endTime.toISOString() : slot.endTime,
+          })),
+        };
+        const versionData = {
           name: trimmedName,
           createdAt: new Date().toISOString(),
           createdBy: {
             userId: user.userId,
             userName: user.userName,
           },
-          project: projectData,
+          project: serializedProject,
         };
         const written = await addDoc(versionsRef, versionData);
         return { ok: true, versionId: written.id };
