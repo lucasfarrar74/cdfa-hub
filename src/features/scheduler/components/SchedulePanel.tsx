@@ -34,6 +34,87 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Preference-violation banner. Shown above the schedule when one or
+// more currently-scheduled meetings violate the supplier's preference
+// (usually because the preference was edited after the schedule was
+// generated). Offers three bulk actions: cancel the violating
+// meetings, move them to Unscheduled, or acknowledge and keep them.
+function PreferenceViolationsBanner({
+  getPreferenceViolations,
+  resolvePreferenceViolations,
+}: {
+  getPreferenceViolations: () => Array<{
+    meetingId: string;
+    supplierId: string;
+    supplierName: string;
+    buyerId: string;
+    buyerName: string;
+  }>;
+  resolvePreferenceViolations: (mode: 'cancel' | 'move-to-unsched' | 'ignore') => { affected: number };
+}) {
+  const violations = getPreferenceViolations();
+  const [dismissed, setDismissed] = useState(false);
+  if (violations.length === 0 || dismissed) return null;
+  return (
+    <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        <svg className="w-5 h-5 mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-amber-900 dark:text-amber-200">
+            {violations.length} meeting{violations.length === 1 ? '' : 's'} now violate the supplier's stated preferences
+          </p>
+          <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
+            A preference was edited after the schedule was generated. Choose how to reconcile — cancelling drops the meeting cleanly; unscheduling keeps the pair in the queue for a future generate; ignoring grandfathers them (they stay).
+          </p>
+          <ul className="mt-2 text-xs text-amber-800 dark:text-amber-300 max-h-24 overflow-y-auto space-y-0.5">
+            {violations.slice(0, 5).map(v => (
+              <li key={v.meetingId}>
+                {v.supplierName} × {v.buyerName}
+              </li>
+            ))}
+            {violations.length > 5 && (
+              <li className="italic">…and {violations.length - 5} more</li>
+            )}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                if (window.confirm(`Cancel ${violations.length} preference-violating meeting(s)?`)) {
+                  resolvePreferenceViolations('cancel');
+                }
+              }}
+              className="px-3 py-1.5 text-sm font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors"
+            >
+              Cancel {violations.length}
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Move ${violations.length} pair(s) to Unscheduled?`)) {
+                  resolvePreferenceViolations('move-to-unsched');
+                }
+              }}
+              className="px-3 py-1.5 text-sm font-medium bg-amber-100 hover:bg-amber-200 dark:bg-amber-950 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 rounded-md transition-colors"
+            >
+              Move to Unscheduled
+            </button>
+            <button
+              onClick={() => {
+                resolvePreferenceViolations('ignore');
+                setDismissed(true);
+              }}
+              className="px-3 py-1.5 text-sm font-medium bg-transparent text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950 rounded-md transition-colors"
+            >
+              Ignore (keep them)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Droppable slot component for empty cells and cells with meetings
 function DroppableSlot({
   id,
@@ -269,6 +350,9 @@ export default function SchedulePanel() {
     activeCollaborators,
     setFocusedMeeting,
     activeProject,
+    shiftScheduleAfter,
+    getPreferenceViolations,
+    resolvePreferenceViolations,
   } = useSchedule();
 
   // Cell-level presence: build a Map<meetingId, ActiveCollaborator[]>
@@ -747,6 +831,15 @@ window.onload = function() { window.print(); };
 
   return (
     <div className="space-y-4">
+      {/* Item E: preference-violation banner. Fires when a supplier's
+          preference was edited after the schedule was generated and
+          existing meetings now violate the new preference. Silent
+          drift is confusing during a live event; this makes it
+          obvious with cancel/unschedule/ignore actions. */}
+      <PreferenceViolationsBanner
+        getPreferenceViolations={getPreferenceViolations}
+        resolvePreferenceViolations={resolvePreferenceViolations}
+      />
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 p-4 no-print">
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <div className="flex gap-2 flex-wrap">
@@ -808,6 +901,43 @@ window.onload = function() { window.print(); };
                   className="px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-md hover:bg-purple-200 dark:hover:bg-purple-900/50"
                 >
                   + Add Meeting
+                </button>
+                {/* Item J: shift-schedule button. Useful when a keynote
+                    or opening ceremony runs long — every meeting from
+                    time X onward gets pushed by N minutes. Uniform
+                    shift, so relative order is preserved. */}
+                <button
+                  onClick={() => {
+                    const currentDate = currentDay || eventDates[0];
+                    if (!currentDate) return;
+                    const timeInput = window.prompt(
+                      `Shift the schedule on ${currentDate}\n\nEnter the time from which meetings should move (HH:MM, 24-hour):`,
+                      '10:00',
+                    );
+                    if (!timeInput) return;
+                    const minutesInput = window.prompt(
+                      `Shift by how many minutes? (Positive = later. Use 15 or 30.)`,
+                      '30',
+                    );
+                    if (!minutesInput) return;
+                    const minutes = parseInt(minutesInput, 10);
+                    if (!Number.isFinite(minutes) || minutes <= 0) {
+                      window.alert('Shift amount must be a positive number of minutes.');
+                      return;
+                    }
+                    const result = shiftScheduleAfter(currentDate, timeInput, minutes);
+                    window.alert(
+                      `Shifted ${result.shiftedIds.length} meeting(s) by ${minutes} min.${
+                        result.couldNotShiftIds.length > 0
+                          ? `\n\n${result.couldNotShiftIds.length} could not move (no matching later slot or party busy) — they stay in place; consider a longer event day.`
+                          : ''
+                      }`,
+                    );
+                  }}
+                  className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 rounded-md hover:bg-amber-200 dark:hover:bg-amber-900/50"
+                  title="Push everything past a chosen time by N minutes"
+                >
+                  Shift schedule…
                 </button>
                 {/* Undo/Redo buttons */}
                 <div className="flex gap-1 border-l border-gray-300 dark:border-gray-600 pl-2 ml-1">
