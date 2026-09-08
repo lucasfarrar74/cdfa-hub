@@ -426,6 +426,25 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
   // we additionally clear the undo history because it's stale relative
   // to whatever the incoming onSnapshot is about to bring in.
   const syncDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  // Latest project scheduled for a debounced sync. Used by the flush
+  // path so unmount / beforeunload can send whatever is pending even
+  // if the debounce timer hasn't fired yet — previously we cleared the
+  // timer and lost the write on any refresh within the debounce window.
+  const pendingSyncProjectRef = useRef<Project | null>(null);
+
+  const flushPendingSync = useCallback(() => {
+    if (!pendingSyncProjectRef.current) return;
+    if (syncDebounceRef.current) {
+      clearTimeout(syncDebounceRef.current);
+      syncDebounceRef.current = null;
+    }
+    const project = pendingSyncProjectRef.current;
+    pendingSyncProjectRef.current = null;
+    // Fire-and-forget. During beforeunload the browser typically lets
+    // the in-flight request complete; on regular unmount it just runs
+    // to completion in the background.
+    void syncProjectChanges(project);
+  }, [syncProjectChanges]);
 
   // Debounced sync function to avoid excessive Firebase writes
   const debouncedSyncToCloud = useCallback((project: Project) => {
@@ -433,31 +452,50 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    pendingSyncProjectRef.current = project;
+
     // Clear existing timeout
     if (syncDebounceRef.current) {
       clearTimeout(syncDebounceRef.current);
     }
 
-    // Debounce: wait 500ms before syncing
+    // Debounce: wait 250ms before syncing (tightened from 500ms so a
+    // quick refresh has half the vulnerability window it used to).
     syncDebounceRef.current = setTimeout(async () => {
-      const outcome = await syncProjectChanges(project);
+      syncDebounceRef.current = null;
+      const scheduled = pendingSyncProjectRef.current;
+      if (!scheduled) return;
+      pendingSyncProjectRef.current = null;
+      const outcome = await syncProjectChanges(scheduled);
       if (outcome === 'conflict') {
         // Undo stack pre-dates the teammate's landing write; nothing
         // in it can be safely applied against the newer server state.
         historyTracker.clear();
         setHistoryState({ canUndo: false, canRedo: false });
       }
-    }, 500);
+    }, 250);
   }, [syncStatus, syncProjectChanges, historyTracker]);
 
-  // Cleanup debounce timeout on unmount
+  // Flush any pending debounced sync when the tab is closing, when the
+  // page is hidden, or on unmount. Previously we just cancelled the
+  // timeout, which meant a refresh within the debounce window silently
+  // dropped whatever the user had just done (added meetings vanished
+  // on refresh — user report).
   useEffect(() => {
-    return () => {
-      if (syncDebounceRef.current) {
-        clearTimeout(syncDebounceRef.current);
-      }
+    const onBeforeUnload = () => flushPendingSync();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushPendingSync();
     };
-  }, []);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibility);
+      // On unmount (route change / provider teardown), flush too — the
+      // in-flight request continues to completion after unmount.
+      flushPendingSync();
+    };
+  }, [flushPendingSync]);
 
   // Helper to update the active project (with cloud sync)
   const updateActiveProject = useCallback((updater: (project: Project) => Project) => {
