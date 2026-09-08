@@ -11,16 +11,26 @@ export default function ParticipantsPanel() {
     suppliers,
     buyers,
     eventConfig,
+    meetings,
     addSupplier,
+    addSupplierAndAutoSchedule,
     updateSupplier,
     removeSupplier,
     addBuyer,
+    addBuyerAndAutoSchedule,
     updateBuyer,
     removeBuyer,
     importSuppliers,
     importBuyers,
     autoAssignBuyerColors,
   } = useSchedule();
+
+  // When a schedule exists, adding a new participant defaults to
+  // auto-scheduling their meetings incrementally without disturbing
+  // anyone else's schedule. The checkbox appears next to the Add
+  // button only when there ARE existing meetings to preserve.
+  const scheduleAlreadyGenerated = meetings.length > 0;
+  const [autoScheduleOnAdd, setAutoScheduleOnAdd] = useState(true);
 
   // Compute event days for multi-day events
   const eventDays = useMemo(() => {
@@ -141,7 +151,18 @@ export default function ParticipantsPanel() {
         preference: 'all',
         preferenceList: [],
       };
-      addSupplier(supplier);
+      if (scheduleAlreadyGenerated && autoScheduleOnAdd) {
+        const result = addSupplierAndAutoSchedule(supplier);
+        // Nudge the admin about anything that couldn't be placed so
+        // they know to review the Unscheduled tab / Preferences.
+        if (result.unplaced > 0) {
+          window.alert(
+            `Added ${companyName} and scheduled ${result.placed} of ${result.placed + result.unplaced} meetings.\n\n${result.unplaced} could not be placed — likely because those buyers are already fully booked in this supplier's availability window. Check the Preferences / Unscheduled tab to see the specifics.`,
+          );
+        }
+      } else {
+        addSupplier(supplier);
+      }
     }
 
     resetForm();
@@ -172,7 +193,16 @@ export default function ParticipantsPanel() {
         organization: buyerOrg,
         email: buyerEmail || undefined,
       };
-      addBuyer(buyer);
+      if (scheduleAlreadyGenerated && autoScheduleOnAdd) {
+        const result = addBuyerAndAutoSchedule(buyer);
+        if (result.unplaced > 0) {
+          window.alert(
+            `Added ${buyerName} and scheduled ${result.placed} of ${result.placed + result.unplaced} meetings.\n\n${result.unplaced} suppliers could not fit them into their availability — check the Preferences / Unscheduled tab.`,
+          );
+        }
+      } else {
+        addBuyer(buyer);
+      }
     }
 
     resetForm();
@@ -676,7 +706,7 @@ export default function ParticipantsPanel() {
                 </div>
               )}
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-2 items-center">
                 <button
                   onClick={handleSaveSupplier}
                   disabled={!companyName || !primaryName}
@@ -690,6 +720,16 @@ export default function ParticipantsPanel() {
                 >
                   Cancel
                 </button>
+                {scheduleAlreadyGenerated && !editingSupplierId && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 ml-2">
+                    <input
+                      type="checkbox"
+                      checked={autoScheduleOnAdd}
+                      onChange={e => setAutoScheduleOnAdd(e.target.checked)}
+                    />
+                    Auto-schedule their meetings against the existing schedule (won't disturb other suppliers)
+                  </label>
+                )}
               </div>
             </div>
           )}
@@ -719,7 +759,7 @@ export default function ParticipantsPanel() {
                   className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100"
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
                 <button
                   onClick={handleAddBuyer}
                   disabled={!buyerName}
@@ -733,6 +773,16 @@ export default function ParticipantsPanel() {
                 >
                   Cancel
                 </button>
+                {scheduleAlreadyGenerated && !editingBuyerId && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 ml-2">
+                    <input
+                      type="checkbox"
+                      checked={autoScheduleOnAdd}
+                      onChange={e => setAutoScheduleOnAdd(e.target.checked)}
+                    />
+                    Auto-schedule against the existing schedule
+                  </label>
+                )}
               </div>
             </div>
           )}

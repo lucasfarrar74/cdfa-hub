@@ -450,6 +450,72 @@ export interface ScheduleContextType extends ScheduleState {
   deleteProjectVersion: (versionId: string) => Promise<boolean>;
 
   /**
+   * Incremental placement — add a supplier and auto-schedule their
+   * meetings without disturbing anyone else's. Returns a summary the
+   * caller can render in a "Placed N, could not schedule M" modal.
+   */
+  addSupplierAndAutoSchedule: (supplier: Supplier) => {
+    additions: Meeting[];
+    unscheduledPairs: UnscheduledPair[];
+    failures: Array<{ supplierId: string; buyerId: string; reason: string }>;
+    placed: number;
+    unplaced: number;
+  };
+  /** Buyer variant of `addSupplierAndAutoSchedule`. */
+  addBuyerAndAutoSchedule: (buyer: Buyer) => {
+    additions: Meeting[];
+    unscheduledPairs: UnscheduledPair[];
+    failures: Array<{ supplierId: string; buyerId: string; reason: string }>;
+    placed: number;
+    unplaced: number;
+  };
+  /** Re-place one supplier's meetings against their (possibly changed) availability. */
+  rebalanceSupplier: (supplierId: string) => { updatedMeetings: Meeting[]; movedIds: string[]; cancelledIds: string[] };
+  /**
+   * Remove supplier from event: cancel their meetings, optionally
+   * reassign each pair to another supplier.
+   */
+  removeSupplierFromEvent: (supplierId: string, reassignTo?: string) => {
+    updatedMeetings: Meeting[];
+    cancelledIds: string[];
+    reassignments: Array<{ oldMeetingId: string; newMeeting: Meeting }>;
+    unscheduledPairs: UnscheduledPair[];
+  };
+  /** Late-arrival helper — move/cancel a supplier's pre-cutoff meetings. */
+  applyLateArrival: (supplierId: string, date: string, earliestHHMM: string) => {
+    updatedMeetings: Meeting[];
+    movedIds: string[];
+    cancelledIds: string[];
+  };
+  /** Bump everything after time X on `date` by N minutes uniformly. */
+  shiftScheduleAfter: (date: string, fromHHMM: string, minutes: number) => {
+    updatedMeetings: Meeting[];
+    shiftedIds: string[];
+    couldNotShiftIds: string[];
+  };
+  /** Extend the event's end date and append new day's slots — schedule preserved. */
+  extendEventEndDate: (newEndDate: string) => { addedSlots: number };
+  /** Reserve a specific slot as blocked; cancels meetings currently in it. */
+  reserveSlot: (slotId: string, reason: string) => { cancelledIds: string[] };
+  /** List currently-scheduled meetings whose pair violates the supplier's preference. */
+  getPreferenceViolations: () => Array<{
+    meetingId: string;
+    supplierId: string;
+    supplierName: string;
+    buyerId: string;
+    buyerName: string;
+  }>;
+  /** Bulk-resolve preference violations. */
+  resolvePreferenceViolations: (mode: 'cancel' | 'move-to-unsched' | 'ignore') => { affected: number };
+  /** Add a break mid-event; cancels overlapping meetings and preserves the rest. */
+  addBreakMidEvent: (breakData: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    date?: string;
+  }) => { cancelledIds: string[] };
+
+  /**
    * Remove a collaborator's uid from the active project. Owner-only in
    * the UI; the Firestore rule is currently permissive (client-side
    * check for a small trusted team — tighten in F+ if needed).

@@ -29,10 +29,25 @@ import type {
 import { isLegacySupplier, migrateSupplier, isLegacyEventConfig, migrateEventConfig } from '../types';
 import { autoFillCancelledSlots, bumpMeetingToLaterSlot, findNextAvailableSlotAfter } from '../utils/scheduler';
 import { resolveScheduleStacks } from '../utils/resolveScheduleStacks';
+import {
+  placeSupplierIncrementally,
+  placeBuyerIncrementally,
+  rebalanceSupplier,
+  removeSupplierFromEvent,
+  applyLateArrival,
+  shiftScheduleAfter,
+  type PlacementResult,
+  type RebalanceResult,
+  type RemoveSupplierResult,
+  type LateArrivalResult,
+  type ShiftScheduleResult,
+} from '../utils/incrementalPlacement';
+import { generateTimeSlots } from '../utils/timeUtils';
 import { assignBuyerColors } from '../utils/colors';
 import {
   checkMoveConflicts as checkMoveConflictsUtil,
   checkAddMeetingConflicts as checkAddMeetingConflictsUtil,
+  checkPreferenceViolation,
   getConflictsForMeeting,
   getScheduleConflictsSummary,
   isSupplierAvailableAtSlot,
@@ -43,6 +58,15 @@ import {
 // Generate unique ID
 function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
+}
+
+// Bump a YYYY-MM-DD date string forward by exactly one day. Used by
+// `extendEventEndDate` to build a config that spans only the newly
+// appended days.
+function bumpDateByOneDay(date: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 // Format a DoubleBooking violation into a short human message for the
@@ -471,6 +495,37 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     setHistoryState({ canUndo: true, canRedo: false });
   }, [activeProject, historyTracker]);
 
+  // Helper: build a short human summary for an activity event. Kept
+  // simple — the History panel will show it verbatim.
+  const buildMeetingLabel = useCallback((meetingId: string): string => {
+    if (!activeProject) return `meeting ${meetingId.slice(0, 6)}`;
+    const m = activeProject.meetings.find(x => x.id === meetingId);
+    if (!m) return `meeting ${meetingId.slice(0, 6)}`;
+    const supplier = activeProject.suppliers.find(s => s.id === m.supplierId);
+    const buyer = activeProject.buyers.find(b => b.id === m.buyerId);
+    return `${supplier?.companyName ?? 'unknown supplier'} × ${buyer?.name ?? 'unknown buyer'}`;
+  }, [activeProject]);
+
+  // Helper: dispatch an activity event with consistent user attribution.
+  // Fire-and-forget; falls back to a no-op when there's no cloud project
+  // to log against (solo-dev mode).
+  const emitActivity = useCallback(
+    (type: ActivityEventType, summary: string, undoPayload: UndoPayload, details: ActivityEvent['details'] = {}) => {
+      if (!activeProject?.isCloud) return;
+      const uid = auth.user?.uid || 'local-user';
+      const userName = auth.user?.displayName || auth.user?.email || undefined;
+      void logActivity({
+        type,
+        userId: uid,
+        userName,
+        summary,
+        details,
+        undoPayload,
+      });
+    },
+    [activeProject, auth.user, logActivity],
+  );
+
   // Undo last operation. Peeks the snapshot first and runs the same
   // double-booking guard used by write mutations — if restoring the
   // snapshot would create a stack (e.g. a teammate's change landed after
@@ -642,27 +697,67 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     [updateActiveProject],
   );
 
-  // Event config. Only wipes the generated schedule when a field that
-  // actually affects slot layout has changed — cosmetic edits (event
-  // name only) preserve meetings + timeSlots. Fields that DO invalidate
-  // the schedule: dates, times, meeting duration, breaks, disabled
-  // days. Strategy / optimizer toggles change what the next generate
-  // WOULD do but don't invalidate an existing schedule, so we preserve.
+  // Event config. Three cases:
+  //  1. Cosmetic-only change (name, strategy, optimizer toggles) →
+  //     preserve schedule.
+  //  2. Pure endDate extension (nothing else changed, new endDate is
+  //     later than old) → preserve schedule + append slots for the
+  //     new day(s). Non-destructive extend.
+  //  3. Any other scheduling-relevant change (start date, times,
+  //     duration, breaks, disabled days, non-extension endDate change)
+  //     → wipe meetings + timeSlots.
   const setEventConfig = useCallback((config: EventConfig) => {
     updateActiveProject(project => {
       const previous = project.eventConfig;
       const isFirstConfig = !previous;
+
+      if (isFirstConfig || !previous) {
+        return {
+          ...project,
+          eventConfig: config,
+          meetings: [],
+          timeSlots: [],
+        };
+      }
+
+      const startDateChanged = previous.startDate !== config.startDate;
+      const endDateChanged = previous.endDate !== config.endDate;
+      const timesChanged = previous.startTime !== config.startTime || previous.endTime !== config.endTime;
+      const durationChanged = previous.defaultMeetingDuration !== config.defaultMeetingDuration;
+      const breaksChanged = JSON.stringify(previous.breaks) !== JSON.stringify(config.breaks);
+      const disabledDaysChanged =
+        JSON.stringify(previous.disabledDays || []) !== JSON.stringify(config.disabledDays || []);
+
+      const isPureEndDateExtension =
+        endDateChanged &&
+        config.endDate > previous.endDate &&
+        !startDateChanged &&
+        !timesChanged &&
+        !durationChanged &&
+        !breaksChanged &&
+        !disabledDaysChanged;
+
+      if (isPureEndDateExtension && project.timeSlots.length > 0) {
+        // Generate slots ONLY for the newly-added trailing days.
+        const newDaysConfig: EventConfig = {
+          ...config,
+          startDate: bumpDateByOneDay(previous.endDate),
+        };
+        const newSlots = generateTimeSlots(newDaysConfig);
+        return {
+          ...project,
+          eventConfig: config,
+          timeSlots: [...project.timeSlots, ...newSlots],
+        };
+      }
+
       const scheduleAffected =
-        isFirstConfig ||
-        !!previous && (
-          previous.startDate !== config.startDate ||
-          previous.endDate !== config.endDate ||
-          previous.startTime !== config.startTime ||
-          previous.endTime !== config.endTime ||
-          previous.defaultMeetingDuration !== config.defaultMeetingDuration ||
-          JSON.stringify(previous.breaks) !== JSON.stringify(config.breaks) ||
-          JSON.stringify(previous.disabledDays || []) !== JSON.stringify(config.disabledDays || [])
-        );
+        startDateChanged ||
+        endDateChanged ||
+        timesChanged ||
+        durationChanged ||
+        breaksChanged ||
+        disabledDaysChanged;
 
       if (scheduleAffected) {
         return {
@@ -689,6 +784,48 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateActiveProject]);
 
+  /**
+   * Add a supplier AND incrementally place their meetings into the
+   * existing schedule. Never moves or cancels existing meetings.
+   *
+   * Returns a summary: how many meetings landed, how many couldn't be
+   * placed (with reasons), what the new unscheduledPairs are.
+   */
+  const addSupplierAndAutoSchedule = useCallback(
+    (supplier: Supplier): PlacementResult & { placed: number; unplaced: number } => {
+      if (!activeProject) {
+        return { additions: [], unscheduledPairs: [], failures: [], placed: 0, unplaced: 0 };
+      }
+      const nextSuppliers = [...activeProject.suppliers, supplier];
+      const result = placeSupplierIncrementally(
+        supplier.id,
+        nextSuppliers,
+        activeProject.buyers,
+        activeProject.timeSlots,
+        activeProject.meetings,
+      );
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        suppliers: [...project.suppliers, supplier],
+        meetings: [...project.meetings, ...result.additions],
+        unscheduledPairs: [...project.unscheduledPairs, ...result.unscheduledPairs],
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Added supplier "${supplier.companyName}" — placed ${result.additions.length} meeting(s), ${result.unscheduledPairs.length} could not be scheduled`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return {
+        ...result,
+        placed: result.additions.length,
+        unplaced: result.unscheduledPairs.length,
+      };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
   const updateSupplier = useCallback((id: string, updates: Partial<Supplier>) => {
     updateActiveProject(project => ({
       ...project,
@@ -713,6 +850,377 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     }));
   }, [updateActiveProject]);
 
+  /**
+   * Rebalance a single supplier's meetings against their (possibly
+   * changed) availability window / selected days. Anything that still
+   * fits stays put; anything that no longer fits is moved (if a
+   * compatible slot exists) or cancelled.
+   */
+  const rebalanceSupplierAction = useCallback(
+    (supplierId: string): RebalanceResult => {
+      if (!activeProject) return { updatedMeetings: [], movedIds: [], cancelledIds: [] };
+      const result = rebalanceSupplier(
+        supplierId,
+        activeProject.suppliers,
+        activeProject.timeSlots,
+        activeProject.meetings,
+      );
+      if (result.movedIds.length === 0 && result.cancelledIds.length === 0) return result;
+      saveToHistory();
+      updateActiveProject(project => ({ ...project, meetings: result.updatedMeetings }));
+      const supplier = activeProject.suppliers.find(s => s.id === supplierId);
+      emitActivity(
+        'auto_fix_applied',
+        `Rebalanced ${supplier?.companyName ?? 'supplier'} — moved ${result.movedIds.length}, cancelled ${result.cancelledIds.length}`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return result;
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * Remove a supplier from the event: cancel all their active meetings,
+   * add the affected buyers to `unscheduledPairs`. If `reassignTo` is
+   * provided, try to place each cancelled pair with that supplier
+   * instead. Other suppliers' meetings are never touched.
+   */
+  const removeSupplierFromEventAction = useCallback(
+    (supplierId: string, reassignTo?: string): RemoveSupplierResult => {
+      if (!activeProject) {
+        return { updatedMeetings: [], cancelledIds: [], reassignments: [], unscheduledPairs: [] };
+      }
+      const result = removeSupplierFromEvent(
+        supplierId,
+        activeProject.suppliers,
+        activeProject.buyers,
+        activeProject.timeSlots,
+        activeProject.meetings,
+        reassignTo,
+      );
+      if (result.cancelledIds.length === 0) return result;
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        meetings: result.updatedMeetings,
+        unscheduledPairs: [...project.unscheduledPairs, ...result.unscheduledPairs],
+      }));
+      const supplier = activeProject.suppliers.find(s => s.id === supplierId);
+      const replacement = reassignTo ? activeProject.suppliers.find(s => s.id === reassignTo) : undefined;
+      const summary = reassignTo
+        ? `Removed ${supplier?.companyName ?? 'supplier'} — reassigned ${result.reassignments.length} to ${replacement?.companyName ?? 'replacement'}, ${result.unscheduledPairs.length} unplaced`
+        : `Removed ${supplier?.companyName ?? 'supplier'} — cancelled ${result.cancelledIds.length} meeting(s)`;
+      emitActivity(
+        'auto_fix_applied',
+        summary,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return result;
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * "Late arrival" — a supplier can only start meeting at `earliestHHMM`
+   * on `date`. Every one of their scheduled meetings before that time
+   * is either bumped to a later same-day slot or cancelled.
+   */
+  const applyLateArrivalAction = useCallback(
+    (supplierId: string, date: string, earliestHHMM: string): LateArrivalResult => {
+      if (!activeProject) return { updatedMeetings: [], movedIds: [], cancelledIds: [] };
+      const result = applyLateArrival(
+        supplierId,
+        date,
+        earliestHHMM,
+        activeProject.suppliers,
+        activeProject.timeSlots,
+        activeProject.meetings,
+      );
+      if (result.movedIds.length === 0 && result.cancelledIds.length === 0) return result;
+      saveToHistory();
+      updateActiveProject(project => ({ ...project, meetings: result.updatedMeetings }));
+      const supplier = activeProject.suppliers.find(s => s.id === supplierId);
+      emitActivity(
+        'auto_fix_applied',
+        `${supplier?.companyName ?? 'Supplier'} late arrival at ${earliestHHMM} — moved ${result.movedIds.length}, cancelled ${result.cancelledIds.length}`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return result;
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * Shift every meeting at/after `fromHHMM` on `date` by `minutes`.
+   * Meetings that can't shift (no matching later slot, or a party is
+   * busy in the target) are left in place; the caller may want to
+   * inspect couldNotShiftIds and handle them separately.
+   */
+  const shiftScheduleAfterAction = useCallback(
+    (date: string, fromHHMM: string, minutes: number): ShiftScheduleResult => {
+      if (!activeProject) return { updatedMeetings: [], shiftedIds: [], couldNotShiftIds: [] };
+      const result = shiftScheduleAfter(date, fromHHMM, minutes, activeProject.timeSlots, activeProject.meetings);
+      if (result.shiftedIds.length === 0) return result;
+      saveToHistory();
+      updateActiveProject(project => ({ ...project, meetings: result.updatedMeetings }));
+      emitActivity(
+        'auto_fix_applied',
+        `Shifted ${result.shiftedIds.length} meeting(s) after ${fromHHMM} by ${minutes} min`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return result;
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * Extend the event by one or more additional days at the end. Only
+   * NEW slots are generated; existing meetings and slots are preserved.
+   * Also updates `eventConfig.endDate` so the config stays coherent.
+   */
+  const extendEventEndDate = useCallback(
+    (newEndDate: string): { addedSlots: number } => {
+      if (!activeProject?.eventConfig) return { addedSlots: 0 };
+      const config = activeProject.eventConfig;
+      if (newEndDate <= config.endDate) return { addedSlots: 0 };
+
+      // Build a temporary config that spans ONLY the new days so
+      // generateTimeSlots only produces those, then append to
+      // existing slots.
+      const nextConfig = { ...config, endDate: newEndDate };
+      const newDayConfig: EventConfig = {
+        ...config,
+        startDate: bumpDateByOneDay(config.endDate),
+        endDate: newEndDate,
+      };
+      const newSlots = generateTimeSlots(newDayConfig);
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        eventConfig: nextConfig,
+        timeSlots: [...project.timeSlots, ...newSlots],
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Extended event to ${newEndDate} — added ${newSlots.length} slot(s), preserved existing schedule`,
+        { kind: 'none' },
+        {},
+      );
+      return { addedSlots: newSlots.length };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * Mark a specific slot as reserved / blocked. Its rendering changes
+   * (dimmed, labeled) and no meetings can be placed there. Any
+   * currently-scheduled active meetings in that slot are cancelled;
+   * bumping them requires a separate manual step.
+   */
+  const reserveSlot = useCallback(
+    (slotId: string, reason: string): { cancelledIds: string[] } => {
+      if (!activeProject) return { cancelledIds: [] };
+      const cancelledIds: string[] = [];
+      const nextMeetings = activeProject.meetings.map(m => {
+        if (m.timeSlotId !== slotId) return m;
+        if (m.status === 'cancelled' || m.status === 'bumped') return m;
+        cancelledIds.push(m.id);
+        return { ...m, status: 'cancelled' as const };
+      });
+      const nextSlots = activeProject.timeSlots.map(s =>
+        s.id === slotId ? { ...s, isBreak: true, breakName: reason || 'Reserved' } : s,
+      );
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        meetings: nextMeetings,
+        timeSlots: nextSlots,
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Reserved slot: ${reason || 'blocked'} (cancelled ${cancelledIds.length} meeting(s))`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return { cancelledIds };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
+  /**
+   * List every currently-scheduled meeting whose supplier×buyer pair
+   * now violates the supplier's preference. Used after editing a
+   * supplier's preference to show the admin what to reconcile.
+   */
+  const getPreferenceViolations = useCallback((): Array<{
+    meetingId: string;
+    supplierId: string;
+    supplierName: string;
+    buyerId: string;
+    buyerName: string;
+  }> => {
+    if (!activeProject) return [];
+    const result: Array<{
+      meetingId: string;
+      supplierId: string;
+      supplierName: string;
+      buyerId: string;
+      buyerName: string;
+    }> = [];
+    for (const m of activeProject.meetings) {
+      if (m.status === 'cancelled' || m.status === 'bumped') continue;
+      const supplier = activeProject.suppliers.find(s => s.id === m.supplierId);
+      const buyer = activeProject.buyers.find(b => b.id === m.buyerId);
+      if (!supplier || !buyer) continue;
+      if (checkPreferenceViolation(supplier, m.buyerId)) {
+        result.push({
+          meetingId: m.id,
+          supplierId: supplier.id,
+          supplierName: supplier.companyName,
+          buyerId: buyer.id,
+          buyerName: buyer.name,
+        });
+      }
+    }
+    return result;
+  }, [activeProject]);
+
+  /**
+   * Resolve preference violations in bulk. `mode`:
+   *  - 'cancel'          — set violating meetings to cancelled
+   *  - 'move-to-unsched' — cancel + add each pair to unscheduledPairs
+   *  - 'ignore'          — no-op (informational log only)
+   */
+  const resolvePreferenceViolations = useCallback(
+    (mode: 'cancel' | 'move-to-unsched' | 'ignore'): { affected: number } => {
+      if (!activeProject) return { affected: 0 };
+      const violations = getPreferenceViolations();
+      if (violations.length === 0) return { affected: 0 };
+      if (mode === 'ignore') {
+        emitActivity(
+          'auto_fix_applied',
+          `Preference violations acknowledged: ${violations.length} grandfathered`,
+          { kind: 'none' },
+          {},
+        );
+        return { affected: violations.length };
+      }
+      const violationIds = new Set(violations.map(v => v.meetingId));
+      const nextMeetings = activeProject.meetings.map(m =>
+        violationIds.has(m.id) ? { ...m, status: 'cancelled' as const } : m,
+      );
+      const additionalPairs: UnscheduledPair[] =
+        mode === 'move-to-unsched'
+          ? violations.map(v => ({ supplierId: v.supplierId, buyerId: v.buyerId }))
+          : [];
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        meetings: nextMeetings,
+        unscheduledPairs:
+          additionalPairs.length > 0
+            ? [...project.unscheduledPairs, ...additionalPairs]
+            : project.unscheduledPairs,
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        mode === 'cancel'
+          ? `Cancelled ${violations.length} preference-violating meeting(s)`
+          : `Moved ${violations.length} preference-violating meeting(s) to unscheduled`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return { affected: violations.length };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity, getPreferenceViolations],
+  );
+
+  /**
+   * Insert a break covering [startTime..endTime] on `date` mid-event.
+   * Any active meetings that fall inside that window are cancelled
+   * (recoverable via the History panel). Slots are regenerated to
+   * reflect the new break.
+   *
+   * `date` is optional — if omitted, the break applies to all enabled
+   * days (matches EventConfig.breaks semantics).
+   */
+  const addBreakMidEvent = useCallback(
+    (breakData: { name: string; startTime: string; endTime: string; date?: string }): { cancelledIds: string[] } => {
+      if (!activeProject?.eventConfig) return { cancelledIds: [] };
+      const existingBreaks = activeProject.eventConfig.breaks || [];
+      const newBreak = {
+        id: generateId(),
+        name: breakData.name,
+        startTime: breakData.startTime,
+        endTime: breakData.endTime,
+        date: breakData.date,
+      };
+      const nextConfig: EventConfig = {
+        ...activeProject.eventConfig,
+        breaks: [...existingBreaks, newBreak],
+      };
+      // Regenerate all slots against the updated config.
+      const regeneratedSlots = generateTimeSlots(nextConfig);
+      // Cancel any active meeting whose old slot falls inside the new
+      // break window (based on date + startTime overlap).
+      const isInBreak = (slot: TimeSlot | undefined): boolean => {
+        if (!slot) return false;
+        if (breakData.date && slot.date !== breakData.date) return false;
+        const t = slot.startTime instanceof Date ? slot.startTime : new Date(slot.startTime);
+        const hhmm = t.toTimeString().substring(0, 5);
+        return hhmm >= breakData.startTime && hhmm < breakData.endTime;
+      };
+      const oldSlotById = new Map(activeProject.timeSlots.map(s => [s.id, s]));
+      const cancelledIds: string[] = [];
+      const nextMeetings = activeProject.meetings.map(m => {
+        if (m.status === 'cancelled' || m.status === 'bumped') return m;
+        if (isInBreak(oldSlotById.get(m.timeSlotId))) {
+          cancelledIds.push(m.id);
+          return { ...m, status: 'cancelled' as const };
+        }
+        return m;
+      });
+
+      // Rebuild slot id references: match old→new slots by (date, HHMM).
+      const slotHHMM = (s: TimeSlot): string => {
+        const t = s.startTime instanceof Date ? s.startTime : new Date(s.startTime);
+        return t.toTimeString().substring(0, 5);
+      };
+      const newSlotIdByKey = new Map<string, string>();
+      for (const s of regeneratedSlots) {
+        newSlotIdByKey.set(`${s.date}__${slotHHMM(s)}`, s.id);
+      }
+      const remappedMeetings = nextMeetings.map(m => {
+        if (m.status === 'cancelled' || m.status === 'bumped') return m;
+        const oldSlot = oldSlotById.get(m.timeSlotId);
+        if (!oldSlot) return m;
+        const key = `${oldSlot.date}__${slotHHMM(oldSlot)}`;
+        const newId = newSlotIdByKey.get(key);
+        return newId ? { ...m, timeSlotId: newId } : m;
+      });
+
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        eventConfig: nextConfig,
+        timeSlots: regeneratedSlots,
+        meetings: remappedMeetings,
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Added break "${breakData.name}" ${breakData.startTime}–${breakData.endTime}${breakData.date ? ` on ${breakData.date}` : ''} — cancelled ${cancelledIds.length} affected meeting(s)`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return { cancelledIds };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
+
   // Buyers
   const addBuyer = useCallback((buyer: Buyer) => {
     updateActiveProject(project => ({
@@ -720,6 +1228,45 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       buyers: [...project.buyers, buyer],
     }));
   }, [updateActiveProject]);
+
+  /**
+   * Add a buyer AND incrementally place their meetings — the buyer
+   * mirror of `addSupplierAndAutoSchedule`.
+   */
+  const addBuyerAndAutoSchedule = useCallback(
+    (buyer: Buyer): PlacementResult & { placed: number; unplaced: number } => {
+      if (!activeProject) {
+        return { additions: [], unscheduledPairs: [], failures: [], placed: 0, unplaced: 0 };
+      }
+      const nextBuyers = [...activeProject.buyers, buyer];
+      const result = placeBuyerIncrementally(
+        buyer.id,
+        activeProject.suppliers,
+        nextBuyers,
+        activeProject.timeSlots,
+        activeProject.meetings,
+      );
+      saveToHistory();
+      updateActiveProject(project => ({
+        ...project,
+        buyers: [...project.buyers, buyer],
+        meetings: [...project.meetings, ...result.additions],
+        unscheduledPairs: [...project.unscheduledPairs, ...result.unscheduledPairs],
+      }));
+      emitActivity(
+        'auto_fix_applied',
+        `Added buyer "${buyer.name}" — placed ${result.additions.length} meeting(s), ${result.unscheduledPairs.length} could not be scheduled`,
+        { kind: 'bulk-meetings', previousMeetings: activeProject.meetings },
+        {},
+      );
+      return {
+        ...result,
+        placed: result.additions.length,
+        unplaced: result.unscheduledPairs.length,
+      };
+    },
+    [activeProject, saveToHistory, updateActiveProject, emitActivity],
+  );
 
   const updateBuyer = useCallback((id: string, updates: Partial<Buyer>) => {
     updateActiveProject(project => ({
@@ -820,37 +1367,6 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
       worker.terminate();
     };
   }, [activeProject, setAppState, updateActiveProject]);
-
-  // Helper: build a short human summary for an activity event. Kept
-  // simple — the History panel will show it verbatim.
-  const buildMeetingLabel = useCallback((meetingId: string): string => {
-    if (!activeProject) return `meeting ${meetingId.slice(0, 6)}`;
-    const m = activeProject.meetings.find(x => x.id === meetingId);
-    if (!m) return `meeting ${meetingId.slice(0, 6)}`;
-    const supplier = activeProject.suppliers.find(s => s.id === m.supplierId);
-    const buyer = activeProject.buyers.find(b => b.id === m.buyerId);
-    return `${supplier?.companyName ?? 'unknown supplier'} × ${buyer?.name ?? 'unknown buyer'}`;
-  }, [activeProject]);
-
-  // Helper: dispatch an activity event with consistent user attribution.
-  // Fire-and-forget; falls back to a no-op when there's no cloud project
-  // to log against (solo-dev mode).
-  const emitActivity = useCallback(
-    (type: ActivityEventType, summary: string, undoPayload: UndoPayload, details: ActivityEvent['details'] = {}) => {
-      if (!activeProject?.isCloud) return;
-      const uid = auth.user?.uid || 'local-user';
-      const userName = auth.user?.displayName || auth.user?.email || undefined;
-      void logActivity({
-        type,
-        userId: uid,
-        userName,
-        summary,
-        details,
-        undoPayload,
-      });
-    },
-    [activeProject, auth.user, logActivity],
-  );
 
   // Apply the inverse of an activity event ("undo this change"). Reads
   // the event's undoPayload and runs the write-time guards on the
@@ -1645,6 +2161,19 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     removeCollaborator,
     transferOwnership,
 
+    // Incremental scheduling
+    addSupplierAndAutoSchedule,
+    addBuyerAndAutoSchedule,
+    rebalanceSupplier: rebalanceSupplierAction,
+    removeSupplierFromEvent: removeSupplierFromEventAction,
+    applyLateArrival: applyLateArrivalAction,
+    shiftScheduleAfter: shiftScheduleAfterAction,
+    extendEventEndDate,
+    reserveSlot,
+    getPreferenceViolations,
+    resolvePreferenceViolations,
+    addBreakMidEvent,
+
     // Undo/Redo
     undo,
     redo,
@@ -1720,6 +2249,17 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     deleteProjectVersion,
     removeCollaborator,
     transferOwnership,
+    addSupplierAndAutoSchedule,
+    addBuyerAndAutoSchedule,
+    rebalanceSupplierAction,
+    removeSupplierFromEventAction,
+    applyLateArrivalAction,
+    shiftScheduleAfterAction,
+    extendEventEndDate,
+    reserveSlot,
+    getPreferenceViolations,
+    resolvePreferenceViolations,
+    addBreakMidEvent,
     undo,
     redo,
     historyState,
