@@ -642,14 +642,43 @@ export function ScheduleProvider({ children }: { children: ReactNode }) {
     [updateActiveProject],
   );
 
-  // Event config
+  // Event config. Only wipes the generated schedule when a field that
+  // actually affects slot layout has changed — cosmetic edits (event
+  // name only) preserve meetings + timeSlots. Fields that DO invalidate
+  // the schedule: dates, times, meeting duration, breaks, disabled
+  // days. Strategy / optimizer toggles change what the next generate
+  // WOULD do but don't invalidate an existing schedule, so we preserve.
   const setEventConfig = useCallback((config: EventConfig) => {
-    updateActiveProject(project => ({
-      ...project,
-      eventConfig: config,
-      meetings: [],
-      timeSlots: [],
-    }));
+    updateActiveProject(project => {
+      const previous = project.eventConfig;
+      const isFirstConfig = !previous;
+      const scheduleAffected =
+        isFirstConfig ||
+        !!previous && (
+          previous.startDate !== config.startDate ||
+          previous.endDate !== config.endDate ||
+          previous.startTime !== config.startTime ||
+          previous.endTime !== config.endTime ||
+          previous.defaultMeetingDuration !== config.defaultMeetingDuration ||
+          JSON.stringify(previous.breaks) !== JSON.stringify(config.breaks) ||
+          JSON.stringify(previous.disabledDays || []) !== JSON.stringify(config.disabledDays || [])
+        );
+
+      if (scheduleAffected) {
+        return {
+          ...project,
+          eventConfig: config,
+          meetings: [],
+          timeSlots: [],
+        };
+      }
+      // Cosmetic-only change (name, scheduling strategy, optimizer
+      // toggles). Preserve the generated schedule.
+      return {
+        ...project,
+        eventConfig: config,
+      };
+    });
   }, [updateActiveProject]);
 
   // Suppliers

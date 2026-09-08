@@ -1016,7 +1016,7 @@ window.onload = function() { window.print(); };
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
               >
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 overflow-auto max-h-[calc(100vh-14rem)]">
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 dark:border-gray-600">
